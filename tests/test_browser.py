@@ -92,11 +92,16 @@ class BrowserMicTests(unittest.TestCase):
         thread.raise_for_status()
         cls.thread_id = thread.json()["id"]
         cls._pw = sync_playwright().start()
-        try:
-            cls._browser = cls._pw.chromium.launch(channel="chrome", headless=True)
-        except Exception:
+        cls._browser = None
+        for channel in ("chrome", "msedge", None):
+            try:
+                cls._browser = cls._pw.chromium.launch(channel=channel, headless=True)
+                break
+            except Exception:
+                continue
+        if cls._browser is None:
             cls._pw.stop()
-            raise unittest.SkipTest("no se pudo abrir Chrome")
+            raise unittest.SkipTest("no se pudo abrir Chrome, Edge ni Chromium")
 
     @classmethod
     def _wait_health(cls):

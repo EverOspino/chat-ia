@@ -1,6 +1,9 @@
+import base64
+import os
 import re
 import shutil
 import subprocess
+import sys
 
 import httpx
 
@@ -9,6 +12,17 @@ from app.errors import AppError, normalize_error, parse_json
 FISH_TTS = "https://api.fish.audio/v1/tts"
 FISH_MODELS = "https://api.fish.audio/model"
 FISH_MODEL_IDS = ("s2.1-pro-free", "s2.1-pro", "s2-pro", "s1")
+
+# El texto llega en base64 por variable de entorno: nunca se interpola en el script.
+SAPI_SCRIPT = (
+    "Add-Type -AssemblyName System.Speech;"
+    "$t=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CHAT_IA_SAY));"
+    "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+    "$v=$s.GetInstalledVoices()|Where-Object{$_.Enabled -and $_.VoiceInfo.Culture.TwoLetterISOLanguageName -eq 'es'}|Select-Object -First 1;"
+    "if(-not $v){exit 3};"
+    "$s.SelectVoice($v.VoiceInfo.Name);"
+    "$s.Speak($t)"
+)
 
 
 def speakable(text: str) -> str:
@@ -54,6 +68,8 @@ def local_say(text: str) -> AppError | None:
     spoken = speakable(text)
     if not spoken:
         return AppError("unknown", "No queda texto para leer.")
+    if sys.platform == "win32":
+        return _windows_say(spoken[:800])
     if not shutil.which("spd-say"):
         return AppError(
             "unknown",
@@ -67,6 +83,32 @@ def local_say(text: str) -> AppError | None:
         )
     except subprocess.TimeoutExpired:
         return AppError("502", "La voz local tardó demasiado.")
+    return None
+
+
+def _windows_say(spoken: str) -> AppError | None:
+    shell = shutil.which("powershell") or shutil.which("pwsh")
+    if not shell:
+        return AppError("unknown", "No se encontró PowerShell para usar la voz de Windows.")
+    env = dict(os.environ, CHAT_IA_SAY=base64.b64encode(spoken.encode("utf-8")).decode("ascii"))
+    try:
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-Command", SAPI_SCRIPT],
+            env=env,
+            timeout=45,
+            check=False,
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return AppError("502", "La voz local tardó demasiado.")
+    if result.returncode == 3:
+        return AppError(
+            "unknown",
+            "Windows no tiene una voz en español. Agregala en Configuración > Hora e idioma > Voz.",
+        )
+    if result.returncode != 0:
+        return AppError("unknown", "La voz de Windows no pudo leer el texto.")
     return None
 
 

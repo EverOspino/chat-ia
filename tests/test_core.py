@@ -51,6 +51,34 @@ class VoiceTests(unittest.TestCase):
         self.assertEqual(parts, ["Hola."])
         self.assertIn("*se", rest)
 
+    def test_windows_say_passes_text_out_of_band(self):
+        import base64
+        import subprocess as sp
+        from app import voice
+
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append((args, kw))
+            return sp.CompletedProcess(args, 0)
+
+        text = "Hola $(rm x); \"y\""
+        with patch.object(voice.sys, "platform", "win32"), patch.object(voice.shutil, "which", return_value="powershell"), patch.object(voice.subprocess, "run", fake_run):
+            self.assertIsNone(voice.local_say(text))
+        args, kw = calls[0]
+        self.assertNotIn("rm x", " ".join(args))
+        sent = base64.b64decode(kw["env"]["CHAT_IA_SAY"]).decode("utf-8")
+        self.assertIn("$(rm x);", sent)
+
+    def test_windows_say_without_spanish_voice(self):
+        import subprocess as sp
+        from app import voice
+
+        with patch.object(voice.sys, "platform", "win32"), patch.object(voice.shutil, "which", return_value="powershell"), patch.object(voice.subprocess, "run", lambda a, **k: sp.CompletedProcess(a, 3)):
+            err = voice.local_say("Hola.")
+        self.assertIsNotNone(err)
+        self.assertIn("español", err.message)
+
 
 class PersonalityTests(unittest.TestCase):
     def test_format_block_is_last_and_not_a_helper(self):

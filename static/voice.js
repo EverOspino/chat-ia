@@ -181,7 +181,7 @@ const Voice = (() => {
             return;
           }
           if (code === "language-unavailable" || code === "voice-unavailable" || code === "synthesis-failed") {
-            reject(new Error("Brave no pudo usar una voz. En Linux instalá speech-dispatcher y espeak-ng, y reiniciá el navegador."));
+            reject(new Error("El navegador no pudo usar una voz. En Windows agregá una voz en español (Configuración > Hora e idioma > Voz); en Linux instalá speech-dispatcher y espeak-ng. Después reiniciá el navegador."));
             return;
           }
           reject(new Error("El navegador no pudo leer el texto (" + (code || "error") + ")."));
