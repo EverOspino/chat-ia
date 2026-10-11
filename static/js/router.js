@@ -44,4 +44,5 @@ function setTab(tab) {
   $("view-connect").classList.toggle("hidden", tab !== "connect");
   $("view-voice").classList.toggle("hidden", tab !== "voice");
   if (tab === "chat") focusDraft();
+  if (tab === "character") ensureCharacterEditor();
 }

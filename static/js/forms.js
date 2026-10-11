@@ -25,11 +25,53 @@ function fillCharacterForm(fields, version) {
   $("f-ejemplo").value = data.ejemplo || "";
   $("f-max").value = data.max_tokens ?? 600;
   $("f-temp").value = data.temperatura ?? 0.85;
-  $("character-version").textContent = version
-    ? "Versión " + version + ". Los cambios valen para el próximo turno. El historial no se reescribe."
-    : "Los cambios valen para el próximo turno. El historial no se reescribe.";
   $("delete-character").disabled = !state.editingCharacterId;
+  characterHead(version);
   requestAnimationFrame(growFormAreas);
+}
+
+function characterUsed(id) {
+  return state.threads.some((thread) => thread.character_id === id);
+}
+
+function characterHead(version) {
+  const name = $("f-nombre").value.trim();
+  $("character-title").textContent = name || (state.editingCharacterId ? "Sin nombre" : "Nuevo personaje");
+  $("character-avatar").textContent = initial(name);
+  const badge = $("character-badge");
+  if (version !== undefined) badge.dataset.version = version || "";
+  const v = badge.dataset.version;
+  const parts = [];
+  if (v) parts.push("Versión " + v);
+  if (state.editingCharacterId && characterUsed(state.editingCharacterId)) parts.push("En uso");
+  badge.textContent = parts.join(" · ") || "Sin guardar";
+  badge.classList.remove("hidden");
+}
+
+function selectCharacter(id) {
+  const found = state.characters.find((item) => item.id === id);
+  if (!found) return;
+  state.editingCharacterId = found.id;
+  fillCharacterForm(found.fields, found.version);
+  $("prompt-preview").textContent = found.prompt_compiled;
+  setStatus("character-status", "");
+  renderCharacters();
+}
+
+async function newCharacter() {
+  state.editingCharacterId = null;
+  const defaults = await api("/api/defaults");
+  fillCharacterForm(defaults.fields, "");
+  $("prompt-preview").textContent = defaults.prompt_compiled;
+  setStatus("character-status", "");
+  renderCharacters();
+}
+
+// Al entrar a Personajes siempre hay una ficha a la vista: la elegida, la primera o una nueva.
+function ensureCharacterEditor() {
+  if (state.editingCharacterId && state.characters.some((c) => c.id === state.editingCharacterId)) return;
+  if (state.characters.length) selectCharacter(state.characters[0].id);
+  else newCharacter().catch((err) => toast(err.message));
 }
 
 function scheduleCompile() {

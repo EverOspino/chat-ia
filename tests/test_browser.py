@@ -223,6 +223,21 @@ class BrowserMicTests(unittest.TestCase):
         self.page.wait_for_function("() => document.getElementById('chat-title').textContent === 'Nora'")
         self.assertIn(self.other_thread_id, self.page.url)
 
+    def test_character_page_lists_and_saves(self):
+        self.page.goto(self.base + "/personajes", wait_until="networkidle")
+        self.page.wait_for_selector("#character-list .entity-row.active")
+        active = self.page.locator("#character-list .entity-row.active strong").inner_text()
+        self.assertEqual(self.page.locator("#character-title").inner_text(), active)
+        self.assertEqual(self.page.locator("#character-list .entity-row").count(), 2)
+        self.page.locator("#new-character-btn").click()
+        self.page.wait_for_function("() => document.getElementById('character-title').textContent === 'Nuevo personaje'")
+        self.page.locator("#f-nombre").fill("Zoe")
+        self.page.locator("#f-edad").fill("30")
+        self.assertEqual(self.page.locator("#character-title").inner_text(), "Zoe")
+        self.page.locator('#character-form button[type="submit"]').click()
+        self.page.wait_for_selector("#character-list .entity-row.active:has-text('Zoe')")
+        self.assertIn("Versión 1", self.page.locator("#character-badge").inner_text())
+
     def test_mobile_menu_opens_and_closes(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.locator("#menu-btn").click()

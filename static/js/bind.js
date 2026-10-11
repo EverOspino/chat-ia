@@ -69,25 +69,9 @@ function bind() {
       await openThread(thread.dataset.thread).catch((err) => toast(err.message));
       return;
     }
-    const characterDelete = event.target.closest("[data-character-delete]");
-    if (characterDelete) {
-      const found = state.characters.find((item) => item.id === characterDelete.dataset.characterDelete);
-      if (!found) return;
-      state.editingCharacterId = found.id;
-      $("delete-character").disabled = false;
-      $("delete-character").click();
-      return;
-    }
     const character = event.target.closest("[data-character]");
     if (character) {
-      const found = state.characters.find((item) => item.id === character.dataset.character);
-      if (!found) return;
-      state.editingCharacterId = found.id;
-      fillCharacterForm(found.fields, found.version);
-      $("prompt-preview").textContent = found.prompt_compiled;
-      renderCharacters();
-      navigate("character");
-      openModal("character-editor");
+      selectCharacter(character.dataset.character);
       return;
     }
     const voiceDelete = event.target.closest("[data-voice-delete]");
@@ -200,9 +184,10 @@ function bind() {
     navigate("chat", "", true);
   });
 
-  $("character-form").addEventListener("input", () => {
+  $("character-form").addEventListener("input", (event) => {
     growFormAreas();
     scheduleCompile();
+    if (event.target.id === "f-nombre") characterHead();
   });
   $("character-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -222,13 +207,12 @@ function bind() {
   });
 
   $("new-character-btn").addEventListener("click", async () => {
-    state.editingCharacterId = null;
-    const defaults = await api("/api/defaults");
-    fillCharacterForm(defaults.fields);
-    $("prompt-preview").textContent = defaults.prompt_compiled;
-    renderCharacters();
-    setStatus("character-status", "");
-    openModal("character-editor");
+    try {
+      await newCharacter();
+      $("f-nombre").focus();
+    } catch (err) {
+      toast(err.message);
+    }
   });
 
   $("delete-character").addEventListener("click", async () => {
@@ -238,10 +222,7 @@ function bind() {
       await api("/api/characters/" + state.editingCharacterId, { method: "DELETE" });
       state.editingCharacterId = null;
       await refreshCore();
-      const defaults = await api("/api/defaults");
-      fillCharacterForm(defaults.fields);
-      $("prompt-preview").textContent = defaults.prompt_compiled;
-      closeModal("character-editor");
+      ensureCharacterEditor();
       setStatus("character-status", "Borrado.", "ok");
     } catch (err) {
       setStatus("character-status", err.message, "bad");
@@ -249,13 +230,8 @@ function bind() {
   });
 
   $("copy-prompt").addEventListener("click", async () => {
-    const text = $("prompt-preview").textContent;
-    try {
-      await navigator.clipboard.writeText(text);
-      setStatus("character-status", "Prompt copiado.", "ok");
-    } catch {
-      setStatus("character-status", "No se pudo copiar.", "bad");
-    }
+    const ok = await copyText($("prompt-preview").textContent);
+    setStatus("character-status", ok ? "Prompt copiado." : "No se pudo copiar.", ok ? "ok" : "bad");
   });
 
   $("provider-form").addEventListener("submit", async (event) => {
@@ -437,7 +413,7 @@ function bind() {
   $("settings-save").addEventListener("click", () => saveSettings());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      const ids = ["settings-modal", "new-thread-modal", "character-editor", "provider-editor", "voice-editor"];
+      const ids = ["settings-modal", "new-thread-modal", "provider-editor", "voice-editor"];
       const open = ids.some((id) => !$(id).classList.contains("hidden"));
       if (!$("settings-modal").classList.contains("hidden")) restoreSettings();
       for (const id of ids) closeModal(id);

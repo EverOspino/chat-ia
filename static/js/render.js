@@ -255,17 +255,24 @@ function renderCharacters() {
     list.appendChild(p);
   }
   for (const character of state.characters) {
-    const fields = character.fields || {};
-    const sub = fields.tono || fields.look || ("v" + character.version);
-    list.appendChild(entityCard({
-      active: state.editingCharacterId === character.id && !$("character-editor").classList.contains("hidden"),
-      name: character.name,
-      sub,
-      actions: [
-        actionBtn("Editar", { "data-character": character.id }),
-        actionBtn("Borrar", { "data-character-delete": character.id }),
-      ],
-    }));
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "entity-row" + (state.editingCharacterId === character.id ? " active" : "");
+    row.dataset.character = character.id;
+    const dot = document.createElement("span");
+    dot.className = "avatar-dot";
+    dot.textContent = initial(character.name);
+    const copy = document.createElement("span");
+    copy.className = "entity-copy";
+    const title = document.createElement("strong");
+    title.textContent = character.name;
+    const sub = document.createElement("small");
+    sub.textContent = ["Versión " + character.version, characterUsed(character.id) ? "En uso" : ""]
+      .filter(Boolean)
+      .join(" · ");
+    copy.append(title, sub);
+    row.append(dot, copy);
+    list.appendChild(row);
   }
   fillSelect(
     $("new-character"),

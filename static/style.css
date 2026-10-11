@@ -1283,6 +1283,215 @@ pre {
   }
 }
 
+/* Personajes: lista a la izquierda, ficha a la derecha. */
+.page-wide { max-width: 1240px; }
+
+.head-btn {
+  flex: none;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 1.1rem;
+  border-radius: var(--radius-sm);
+}
+
+.glass-panel {
+  background: var(--glass);
+  backdrop-filter: var(--blur);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.split-list {
+  position: sticky;
+  top: 0;
+  padding: 1rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.panel-title {
+  margin: 0 0.4rem 0.2rem;
+  font-size: 1rem;
+}
+
+.entity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.65rem 0.7rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 14px;
+}
+
+.entity-row:hover:not(:disabled) { background: var(--surface-2); border-color: transparent; }
+
+.entity-row.active,
+.entity-row.active:hover:not(:disabled) {
+  background: var(--accent-soft);
+  border-color: rgba(242, 143, 171, 0.45);
+}
+
+.entity-row .avatar-dot { width: 2.5rem; height: 2.5rem; }
+
+.editor {
+  padding: 0 0 1.2rem;
+  gap: 0;
+  overflow: hidden;
+}
+
+.editor-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem 1.3rem;
+  border-bottom: 1px solid var(--line);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.editor-head h2 {
+  margin: 0;
+  min-width: 0;
+  font-size: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-head .badge-status {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  border: 1px solid rgba(242, 143, 171, 0.3);
+}
+
+.form-section, .fold {
+  margin: 0.9rem 1.3rem 0;
+}
+
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.form-section h3, .fold summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.form-section h3 svg, .fold summary svg { color: var(--muted); flex: none; }
+
+.grid-name { grid-template-columns: 2fr 1fr; }
+
+.fold {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.fold summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0.8rem 1rem;
+  border-radius: 14px;
+  transition: background 0.18s var(--ease);
+}
+
+.fold summary::-webkit-details-marker { display: none; }
+
+.fold summary::after {
+  content: "";
+  margin-left: auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg);
+  transition: transform 0.2s var(--ease);
+}
+
+.fold[open] summary::after { transform: rotate(45deg); }
+.fold summary:hover { background: var(--surface-2); }
+
+.fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.2rem 1rem 1rem;
+}
+
+.fold-body.grid-2 { display: grid; }
+
+.info-note {
+  margin: 0.9rem 1.3rem 0;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.86rem;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border: 1px solid rgba(242, 143, 171, 0.25);
+  border-radius: 10px;
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin: 1rem 1.3rem 0;
+}
+
+.editor-actions .primary { padding: 0.65rem 1.3rem; }
+
+.danger-btn { color: var(--danger); border-color: rgba(240, 137, 122, 0.35); }
+
+.danger-btn:hover:not(:disabled) {
+  color: #ffb3a8;
+  background: rgba(240, 137, 122, 0.12);
+  border-color: rgba(240, 137, 122, 0.55);
+}
+
+.editor > .status { margin: 0.6rem 1.3rem 0; }
+
+@media (max-width: 1100px) {
+  .split { grid-template-columns: 240px minmax(0, 1fr); }
+}
+
+@media (max-width: 860px) {
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split-list { position: static; padding: 0.7rem; }
+  #character-list {
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 0.4rem;
+    scrollbar-width: none;
+  }
+  #character-list .entity-row { width: auto; flex: none; padding: 0.45rem 0.8rem 0.45rem 0.45rem; }
+  #character-list .entity-copy small { display: none; }
+  .head-btn { padding: 0.55rem 0.8rem; }
+  .form-section, .fold, .info-note, .editor-actions { margin-left: 0.9rem; margin-right: 0.9rem; }
+  .editor-head { padding: 0.8rem 0.9rem; }
+  .grid-name { display: grid; grid-template-columns: 2fr 1fr; }
+}
+
 .menu-btn, .menu-backdrop { display: none; }
 
 /* Celular: el personaje ocupa la pantalla y el chat flota encima, como en Grok. */
