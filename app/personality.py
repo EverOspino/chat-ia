@@ -123,18 +123,38 @@ def compile_prompt(fields: dict | None) -> str:
     return "\n\n".join(blocks)
 
 
-def approx_tokens(messages: list[dict]) -> int:
+CHARS_PER_TOKEN = 3.5
+RATIO_MIN = 0.5
+RATIO_MAX = 3.0
+
+
+def approx_tokens(messages: list[dict], ratio: float = 1.0) -> int:
     chars = 0
     for msg in messages:
         chars += len(msg.get("content") or "")
-    return chars // 4 + 8 * len(messages)
+    raw = chars / CHARS_PER_TOKEN + 8 * len(messages)
+    return int(raw * ratio) + 1
 
 
-def trim_messages(messages: list[dict], context_tokens: int, max_output: int) -> list[dict]:
+def calibrate_ratio(previous: float | None, tokens_in: int | None, messages: list[dict]) -> float | None:
+    """Ajusta la estimación con los tokens_in reales que reportó el proveedor."""
+    if not tokens_in or tokens_in <= 0:
+        return previous
+    estimate = approx_tokens(messages)
+    if estimate <= 0:
+        return previous
+    measured = max(RATIO_MIN, min(RATIO_MAX, tokens_in / estimate))
+    if previous is None:
+        return round(measured, 4)
+    return round(previous * 0.5 + measured * 0.5, 4)
+
+
+def trim_messages(messages: list[dict], context_tokens: int, max_output: int, ratio: float | None = None) -> list[dict]:
     budget = max(256, int(context_tokens) - int(max_output) - 256)
+    factor = max(RATIO_MIN, min(RATIO_MAX, ratio)) if ratio else 1.0
     system = [m for m in messages if m.get("role") == "system"]
     rest = [m for m in messages if m.get("role") != "system"]
-    while len(rest) > 1 and approx_tokens(system + rest) > budget:
+    while len(rest) > 1 and approx_tokens(system + rest, factor) > budget:
         rest.pop(0)
     while len(rest) > 1 and rest[0].get("role") == "assistant":
         rest.pop(0)

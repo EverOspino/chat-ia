@@ -12,6 +12,17 @@ from app.errors import AppError, normalize_error, parse_json
 FISH_TTS = "https://api.fish.audio/v1/tts"
 FISH_MODELS = "https://api.fish.audio/model"
 FISH_MODEL_IDS = ("s2.1-pro-free", "s2.1-pro", "s2-pro", "s1")
+FISH_BAD_KEY = (
+    "Fish Audio rechazó la key. Copiá la secret key desde fish.audio > API Keys "
+    "(32 caracteres, 0-9 y a-f) y pegala de nuevo."
+)
+
+
+def fish_error(status: int, body: str) -> AppError:
+    err = normalize_error(status, body, parse_json(body))
+    if err.error_class == "401":
+        return AppError("401", FISH_BAD_KEY, err.http_status)
+    return err
 
 # El texto llega en base64 por variable de entorno: nunca se interpola en el script.
 SAPI_SCRIPT = (
@@ -25,9 +36,17 @@ SAPI_SCRIPT = (
 )
 
 
+_MARK = r"[*«»\"“”]"
+
+
+def strip_marks(text: str) -> str:
+    # Un * o comilla pegado a una palabra sin puntuación es borde de acción o pensamiento: va un punto para la pausa.
+    paused = re.sub(r"(\w)[ \t]*" + _MARK, r"\1. ", text or "")
+    return re.sub(_MARK, " ", paused)
+
+
 def speakable(text: str) -> str:
-    cleaned = re.sub(r"\*", " ", text or "")
-    cleaned = re.sub(r"[«»\"“”]", " ", cleaned)
+    cleaned = strip_marks(text)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
 
@@ -39,9 +58,7 @@ def consume_sentences(buffer: str) -> tuple[list[str], str]:
         cut = stripped.rfind("*")
         held = stripped[cut:]
         stripped = stripped[:cut]
-    prepared = re.sub(r"\*", " ", stripped)
-    prepared = re.sub(r"[«»\"“”]", " ", prepared)
-    prepared = re.sub(r"[ \t]+", " ", prepared)
+    prepared = re.sub(r"[ \t]+", " ", strip_marks(stripped))
     parts: list[str] = []
     rest = prepared
     pattern = re.compile(r"^(.+?[.!?…])(?:\s+|$)")
@@ -144,8 +161,7 @@ async def fish_tts(api_key: str, text: str, voice_id: str, model: str) -> tuple[
     except httpx.HTTPError:
         return b"", AppError("502", "Falló la conexión con Fish Audio.")
     if resp.status_code != 200:
-        text_body = resp.text
-        return b"", normalize_error(resp.status_code, text_body, parse_json(text_body))
+        return b"", fish_error(resp.status_code, resp.text)
     if not resp.content:
         return b"", AppError("parse_empty", "Fish Audio devolvió un audio vacío.")
     return resp.content, None
@@ -162,7 +178,7 @@ async def fish_list_voices(api_key: str) -> tuple[list[dict], AppError | None]:
         return [], AppError("502", "No se pudo listar las voces de Fish Audio.")
     parsed = parse_json(resp.text)
     if resp.status_code != 200:
-        return [], normalize_error(resp.status_code, resp.text, parsed)
+        return [], fish_error(resp.status_code, resp.text)
     items = parsed.get("items") if isinstance(parsed, dict) else None
     if not isinstance(items, list):
         return [], AppError("parse_empty", "Fish Audio no devolvió una lista de voces.")

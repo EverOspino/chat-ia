@@ -11,13 +11,13 @@ import sys
 
 sys.path.insert(0, str(ROOT))
 
-from app.adapter import stream_chat, test_connection
+from app.adapter import build_payload, stream_chat, test_connection, whisper_models
 from app.adapter import Delta, StreamDone, StreamFail
 from app.errors import AppError, extract_text, normalize_error
-from app.personality import assemble_messages, compile_prompt, minor_age_error, parse_replies, suggestion_messages, trim_messages
+from app.personality import approx_tokens, assemble_messages, calibrate_ratio, compile_prompt, minor_age_error, parse_replies, suggestion_messages, trim_messages
 from app.avatars import allowed, default_model, list_models as list_avatar_files
 from app.animations import allowed as anim_allowed, list_clips
-from app.voice import consume_sentences, speakable
+from app.voice import FISH_BAD_KEY, consume_sentences, fish_error, speakable
 
 
 class AvatarTests(unittest.TestCase):
@@ -46,10 +46,30 @@ class VoiceTests(unittest.TestCase):
         self.assertIn("Hola", spoken)
         self.assertIn("cruza", spoken)
 
+    def test_action_edges_get_a_pause(self):
+        self.assertEqual(
+            speakable('*le pasa el libro sin mirarla a los ojos* "Creo en lo que deja la marea."'),
+            "le pasa el libro sin mirarla a los ojos. Creo en lo que deja la marea.",
+        )
+        self.assertEqual(speakable("Hola *se ríe* qué tal"), "Hola. se ríe. qué tal")
+        self.assertEqual(speakable("¿Venís? *espera*"), "¿Venís? espera.")
+        self.assertEqual(speakable("*suspira…* Bueno."), "suspira… Bueno.")
+        parts, rest = consume_sentences("*acomoda los libros* Ese estante no se toca")
+        self.assertEqual(parts, ["acomoda los libros."])
+        self.assertEqual(rest.strip(), "Ese estante no se toca")
+
     def test_split_keeps_unclosed_action(self):
         parts, rest = consume_sentences("Hola. *se")
         self.assertEqual(parts, ["Hola."])
         self.assertIn("*se", rest)
+
+    def test_fish_bad_key_message(self):
+        err = fish_error(401, "No permission -- see authorization schemes")
+        self.assertEqual(err.error_class, "401")
+        self.assertIn("Fish Audio", err.message)
+        self.assertNotIn("OpenRouter", err.message)
+        other = fish_error(500, "boom")
+        self.assertNotEqual(other.message, FISH_BAD_KEY)
 
     def test_windows_say_passes_text_out_of_band(self):
         import base64
@@ -113,6 +133,25 @@ class PersonalityTests(unittest.TestCase):
         self.assertEqual(trimmed[0]["content"], "SYS")
         self.assertEqual(trimmed[-1]["content"], "nuevo")
         self.assertLess(len(trimmed), 4)
+
+    def test_calibrate_ratio_tracks_provider_tokens(self):
+        msgs = [{"role": "system", "content": "x" * 3500}]
+        estimate = approx_tokens(msgs)
+        self.assertEqual(calibrate_ratio(None, None, msgs), None)
+        self.assertEqual(calibrate_ratio(1.2, 0, msgs), 1.2)
+        first = calibrate_ratio(None, estimate * 2, msgs)
+        self.assertAlmostEqual(first, 2.0, places=2)
+        self.assertAlmostEqual(calibrate_ratio(first, estimate, msgs), 1.5, places=2)
+        self.assertEqual(calibrate_ratio(None, estimate * 100, msgs), 3.0)
+
+    def test_trim_uses_ratio(self):
+        system = {"role": "system", "content": "SYS"}
+        mid = {"role": "user", "content": "x" * 3000}
+        latest = {"role": "user", "content": "nuevo"}
+        plain = trim_messages([system, mid, latest], 2000, 100)
+        heavy = trim_messages([system, mid, latest], 2000, 100, ratio=2.5)
+        self.assertEqual(len(plain), 3)
+        self.assertEqual([m["content"] for m in heavy], ["SYS", "nuevo"])
 
     def test_assemble_skips_notices(self):
         msgs = assemble_messages("SYS", [
@@ -281,6 +320,70 @@ class AdapterTests(unittest.TestCase):
         self.assertNotIn("sk-secret", items[0].error.message)
         self.assertNotIn("NoneType", items[0].error.message)
 
+    def test_openrouter_transcribes_with_turbo_first(self):
+        self.assertEqual(
+            whisper_models("https://openrouter.ai/api/v1"),
+            ("openai/whisper-large-v3-turbo", "openai/whisper-1"),
+        )
+
+    def test_openrouter_disables_reasoning(self):
+        routed = build_payload("m", [], 400, 0.8, "https://openrouter.ai/api/v1")
+        self.assertEqual(routed["reasoning"], {"enabled": False})
+        plain = build_payload("m", [], 400, 0.8, "https://api.groq.com/openai/v1")
+        self.assertNotIn("reasoning", plain)
+
+    def test_mandatory_reasoning_retries_low(self):
+        sent = []
+
+        class Rejected:
+            status_code = 400
+
+            async def aread(self):
+                return b'{"error":{"message":"Reasoning is mandatory for this endpoint and cannot be disabled.","code":400}}'
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        class Ok:
+            status_code = 200
+
+            async def aiter_lines(self):
+                yield 'data: {"choices":[{"delta":{"content":"Hola"}}]}'
+                yield "data: [DONE]"
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        class Client:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+            def stream(self, method, url, headers=None, json=None):
+                sent.append(json)
+                return Rejected() if len(sent) == 1 else Ok()
+
+        async def run():
+            with patch("app.adapter.httpx.AsyncClient", Client):
+                return [item async for item in stream_chat("https://openrouter.ai/api/v1", "sk", "m", [], 100, 0.5)]
+
+        items = asyncio.run(run())
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sent[1]["reasoning"], {"effort": "low", "exclude": True})
+        self.assertEqual("".join(i.text for i in items if isinstance(i, Delta)), "Hola")
+        self.assertFalse(any(isinstance(i, StreamFail) for i in items))
+
     def test_connection_uses_models_not_chat(self):
         class Resp:
             status_code = 200
@@ -321,12 +424,26 @@ class ApiTests(unittest.TestCase):
         from fastapi.testclient import TestClient
         from app.main import app
 
-        self._ctx = TestClient(app)
+        self._ctx = TestClient(app, base_url="http://127.0.0.1:8765")
         self.client = self._ctx.__enter__()
 
     def tearDown(self):
         self._ctx.__exit__(None, None, None)
         self.tmp.cleanup()
+
+    def test_local_only_guard(self):
+        self.assertEqual(self.client.get("/api/health").status_code, 200)
+        rebound = self.client.get("/api/threads", headers={"host": "evil.example:8765"})
+        self.assertEqual(rebound.status_code, 403)
+        fields = {"fields": {"nombre": "Vera"}}
+        same = self.client.post("/api/compile", json=fields, headers={"origin": "http://127.0.0.1:8765"})
+        self.assertEqual(same.status_code, 200)
+        cross = self.client.post("/api/compile", json=fields, headers={"origin": "https://evil.example"})
+        self.assertEqual(cross.status_code, 403)
+        opaque = self.client.post("/api/compile", json=fields, headers={"origin": "null"})
+        self.assertEqual(opaque.status_code, 403)
+        other_port = self.client.post("/api/compile", json=fields, headers={"origin": "http://127.0.0.1:9999"})
+        self.assertEqual(other_port.status_code, 403)
 
     def test_spa_routes_serve_index(self):
         for path in ("/", "/chat", "/personajes", "/conexiones", "/voces"):

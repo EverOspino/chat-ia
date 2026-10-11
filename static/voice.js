@@ -19,10 +19,15 @@ const Voice = (() => {
     return Math.min(1, Math.max(0, n));
   }
 
-  function speakable(text) {
+  // Un * o comilla pegado a una palabra sin puntuación es borde de acción o pensamiento: va un punto para la pausa.
+  function stripMarks(text) {
     return (text || "")
-      .replace(/\*/g, " ")
-      .replace(/[«»""“”]/g, " ")
+      .replace(/([\p{L}\p{N}_])[ \t]*[*«»"“”]/gu, "$1. ")
+      .replace(/[*«»"“”]/g, " ");
+  }
+
+  function speakable(text) {
+    return stripMarks(text)
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -35,7 +40,7 @@ const Voice = (() => {
       held = stripped.slice(cut);
       stripped = stripped.slice(0, cut);
     }
-    const prepared = stripped.replace(/\*/g, " ").replace(/[«»""“”]/g, " ").replace(/[ \t]+/g, " ");
+    const prepared = stripMarks(stripped).replace(/[ \t]+/g, " ");
     const parts = [];
     let rest = prepared;
     const pattern = /^(.+?[.!?…])(?:\s+|$)/;

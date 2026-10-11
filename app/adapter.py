@@ -85,9 +85,21 @@ def build_payload(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
-    if stream and "openrouter.ai" in base_url.lower():
-        payload["stream_options"] = {"include_usage": True}
+    if "openrouter.ai" in base_url.lower():
+        if stream:
+            payload["stream_options"] = {"include_usage": True}
+        # Los modelos que razonan gastan max_tokens pensando y la respuesta llega vacía.
+        payload["reasoning"] = {"enabled": False}
     return payload
+
+
+def reasoning_mandatory(status: int, body: str) -> bool:
+    return status == 400 and "reasoning is mandatory" in (body or "").lower()
+
+
+def low_reasoning(payload: dict) -> dict:
+    """Para modelos que no dejan apagar el razonamiento: que piense poco y no lo devuelva."""
+    return {**payload, "reasoning": {"effort": "low", "exclude": True}}
 
 
 def parse_models(parsed) -> list[dict]:
@@ -226,22 +238,26 @@ async def stream_chat(
     url = f"{base}/chat/completions"
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-            async with client.stream(
-                "POST",
-                url,
-                headers=auth_headers(api_key, base),
-                json=payload,
-            ) as resp:
-                if resp.status_code in (301, 302, 303, 307, 308):
-                    yield StreamFail(AppError("unknown", "La Base URL redirigió. Revisala: no pongas /keys."))
+            for attempt in (payload, low_reasoning(payload)):
+                async with client.stream(
+                    "POST",
+                    url,
+                    headers=auth_headers(api_key, base),
+                    json=attempt,
+                ) as resp:
+                    if resp.status_code in (301, 302, 303, 307, 308):
+                        yield StreamFail(AppError("unknown", "La Base URL redirigió. Revisala: no pongas /keys."))
+                        return
+                    if resp.status_code != 200:
+                        body = await resp.aread()
+                        text = body.decode("utf-8", errors="replace")
+                        if "reasoning" in attempt and attempt is payload and reasoning_mandatory(resp.status_code, text):
+                            continue
+                        yield StreamFail(normalize_error(resp.status_code, text, parse_json(text)))
+                        return
+                    async for item in _read_sse(resp):
+                        yield item
                     return
-                if resp.status_code != 200:
-                    body = await resp.aread()
-                    text = body.decode("utf-8", errors="replace")
-                    yield StreamFail(normalize_error(resp.status_code, text, parse_json(text)))
-                    return
-                async for item in _read_sse(resp):
-                    yield item
     except httpx.HTTPError as exc:
         yield StreamFail(_connect_error(exc))
 
@@ -265,6 +281,8 @@ async def complete_chat(
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             resp = await client.post(url, headers=auth_headers(api_key, base), json=payload)
+            if "reasoning" in payload and reasoning_mandatory(resp.status_code, resp.text):
+                resp = await client.post(url, headers=auth_headers(api_key, base), json=low_reasoning(payload))
     except httpx.HTTPError as exc:
         return "", _connect_error(exc), None, None
     if resp.status_code in (301, 302, 303, 307, 308):
@@ -290,7 +308,7 @@ def whisper_models(base_url: str) -> tuple[str, ...]:
     if "groq.com" in low:
         return ("whisper-large-v3-turbo", "whisper-large-v3")
     if "openrouter.ai" in low:
-        return ("openai/whisper-1",)
+        return ("openai/whisper-large-v3-turbo", "openai/whisper-1")
     if "openai.com" in low:
         return ("whisper-1",)
     return ("whisper-large-v3-turbo", "whisper-large-v3", "whisper-1")

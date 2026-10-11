@@ -15,6 +15,7 @@ from app.errors import AppError
 from app.personality import (
     ADULT_RULE,
     assemble_messages,
+    calibrate_ratio,
     compile_prompt,
     default_fields,
     minor_age_error,
@@ -43,7 +44,51 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+
+def _hostname(netloc: str) -> str:
+    if netloc.startswith("["):
+        return netloc.split("]", 1)[0] + "]"
+    return netloc.rsplit(":", 1)[0].lower()
+
+
+class LocalOnly:
+    """Corta DNS rebinding (Host ajeno) y pedidos de otras webs (Origin ajeno)."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        headers = {k.decode("latin-1"): v.decode("latin-1") for k, v in scope["headers"]}
+        host = headers.get("host", "")
+        if _hostname(host) not in LOCAL_HOSTS:
+            return await _forbidden(send, "Host no permitido. Abrí la app en http://127.0.0.1:8765.")
+        origin = headers.get("origin")
+        if origin and scope["method"] not in SAFE_METHODS:
+            netloc = origin.split("://", 1)[-1]
+            if origin == "null" or netloc != host:
+                return await _forbidden(send, "Pedido de otro sitio. Se bloqueó.")
+        return await self.app(scope, receive, send)
+
+
+async def _forbidden(send, message: str) -> None:
+    body = json.dumps({"detail": message}, ensure_ascii=False).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 403,
+            "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())],
+        }
+    )
+    await send({"type": "http.response.body", "body": body})
+
+
 app = FastAPI(title="Chat IA", lifespan=lifespan)
+app.add_middleware(LocalOnly)
 
 
 class FieldsIn(BaseModel):
@@ -90,6 +135,12 @@ class MessageIn(BaseModel):
     model: str | None = None
     context_tokens: int | None = None
     retry_message_id: str | None = None
+
+
+EMPTY_TURN = (
+    "El modelo terminó sin escribir nada. Si es un modelo que razona, pudo gastar todo el tope "
+    "de tokens pensando: subí max_tokens en la ficha o probá otro modelo."
+)
 
 
 def sse(event: str, data: dict) -> str:
@@ -344,103 +395,6 @@ def _persist_turn(thread_id: str, model: str, parts: list[str], error: AppError 
     )
 
 
-@app.post("/api/threads/{thread_id}/messages")
-async def post_message(thread_id: str, body: MessageIn, request: Request):
-    thread = db.get_thread(thread_id)
-    if thread is None:
-        raise HTTPException(404, "Ese hilo no está.")
-    retry_id = (body.retry_message_id or "").strip()
-    kept = db.user_message(thread_id, retry_id) if retry_id else None
-    if retry_id and kept is None:
-        raise HTTPException(400, "No se puede reintentar ese mensaje.")
-    content = kept["content"] if kept else body.content.strip()
-    if not content:
-        raise HTTPException(400, "Escribí un mensaje.")
-    if len(content) > 20000:
-        raise HTTPException(400, "Ese mensaje es demasiado largo.")
-    if body.model is not None or body.context_tokens is not None:
-        model = body.model.strip() if isinstance(body.model, str) else None
-        if model == "":
-            raise HTTPException(400, "Falta el modelo. Cambiarlo no reescribe el personaje.")
-        context = clamp_context(body.context_tokens) if body.context_tokens is not None else None
-        thread = db.update_thread(thread_id, model=model, context_tokens=context)
-    character = db.get_character(thread["character_id"]) if thread.get("character_id") else None
-    if character is None:
-        raise HTTPException(400, "Este hilo no tiene personaje.")
-    age_err = minor_age_error(character["fields"])
-    if age_err:
-        raise HTTPException(400, age_err)
-    provider = db.get_provider(thread["provider_account_id"], secret=True) if thread.get("provider_account_id") else None
-    if provider is None:
-        raise HTTPException(400, "Esta conexión ya no está. Elegí otra. El personaje sigue igual.")
-    model = (thread.get("model") or "").strip()
-    if not model:
-        raise HTTPException(400, "Elegí un modelo. No hace falta tocar la ficha.")
-    if needs_key(provider["base_url"]) and not provider["api_key"]:
-        raise HTTPException(400, "Falta la API key de esta conexión.")
-    system = compile_prompt(character["fields"])
-    if kept:
-        db.truncate_after(thread_id, kept["id"])
-    else:
-        db.add_message(thread_id, "user", content)
-        if thread.get("title") in (None, "", "Nuevo hilo"):
-            db.update_thread(thread_id, title=title_from(content))
-    history = db.list_messages(thread_id)
-    assembled = assemble_messages(system, history)
-    trimmed = trim_messages(assembled, clamp_context(thread.get("context_tokens")), character["max_tokens"])
-
-    async def events():
-        parts: list[str] = []
-        error: AppError | None = None
-        tin = None
-        tout = None
-        try:
-            async for item in stream_chat(
-                provider["base_url"],
-                provider["api_key"],
-                model,
-                trimmed,
-                character["max_tokens"],
-                character["temperature"],
-            ):
-                if await request.is_disconnected():
-                    break
-                if isinstance(item, Delta):
-                    parts.append(item.text)
-                    if sum(len(p) for p in parts) > 50000:
-                        error = AppError("unknown", "Se cortó el turno: superó el tope local de texto.")
-                        break
-                    yield sse("delta", {"text": item.text})
-                elif isinstance(item, StreamFail):
-                    error = item.error
-                    break
-                elif isinstance(item, StreamDone):
-                    tin = item.tokens_in
-                    tout = item.tokens_out
-        except Exception:
-            error = AppError("unknown", "Falló el cliente al leer el stream. No se asumió choices[0].")
-        finally:
-            try:
-                _persist_turn(thread_id, model, parts, error, tin, tout)
-            except Exception:
-                if error is None:
-                    error = AppError("unknown", "No se pudo guardar el turno en disco.")
-        try:
-            if await request.is_disconnected():
-                return
-            if error is not None:
-                yield sse("error", {"error_class": error.error_class, "message": error.message})
-            yield sse("done", {"ok": error is None})
-        except Exception:
-            return
-
-    return StreamingResponse(
-        events(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-
 def _chat_ready(thread_id: str):
     thread = db.get_thread(thread_id)
     if thread is None:
@@ -462,12 +416,107 @@ def _chat_ready(thread_id: str):
     return thread, character, provider, model
 
 
+@app.post("/api/threads/{thread_id}/messages")
+async def post_message(thread_id: str, body: MessageIn, request: Request):
+    thread = db.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(404, "Ese hilo no está.")
+    retry_id = (body.retry_message_id or "").strip()
+    kept = db.user_message(thread_id, retry_id) if retry_id else None
+    if retry_id and kept is None:
+        raise HTTPException(400, "No se puede reintentar ese mensaje.")
+    content = kept["content"] if kept else body.content.strip()
+    if not content:
+        raise HTTPException(400, "Escribí un mensaje.")
+    if len(content) > 20000:
+        raise HTTPException(400, "Ese mensaje es demasiado largo.")
+    if body.model is not None or body.context_tokens is not None:
+        model = body.model.strip() if isinstance(body.model, str) else None
+        if model == "":
+            raise HTTPException(400, "Falta el modelo. Cambiarlo no reescribe el personaje.")
+        context = clamp_context(body.context_tokens) if body.context_tokens is not None else None
+        db.update_thread(thread_id, model=model, context_tokens=context)
+    thread, character, provider, model = _chat_ready(thread_id)
+    system = compile_prompt(character["fields"])
+    if kept:
+        db.truncate_after(thread_id, kept["id"])
+    else:
+        db.add_message(thread_id, "user", content)
+        if thread.get("title") in (None, "", "Nuevo hilo"):
+            db.update_thread(thread_id, title=title_from(content))
+    history = db.list_messages(thread_id)
+    assembled = assemble_messages(system, history)
+    ratio = db.token_ratio(thread, model)
+    trimmed = trim_messages(assembled, clamp_context(thread.get("context_tokens")), character["max_tokens"], ratio)
+
+    async def events():
+        parts: list[str] = []
+        error: AppError | None = None
+        gone = False
+        tin = None
+        tout = None
+        try:
+            async for item in stream_chat(
+                provider["base_url"],
+                provider["api_key"],
+                model,
+                trimmed,
+                character["max_tokens"],
+                character["temperature"],
+            ):
+                if await request.is_disconnected():
+                    gone = True
+                    break
+                if isinstance(item, Delta):
+                    parts.append(item.text)
+                    if sum(len(p) for p in parts) > 50000:
+                        error = AppError("unknown", "Se cortó el turno: superó el tope local de texto.")
+                        break
+                    yield sse("delta", {"text": item.text})
+                elif isinstance(item, StreamFail):
+                    error = item.error
+                    break
+                elif isinstance(item, StreamDone):
+                    tin = item.tokens_in
+                    tout = item.tokens_out
+            if error is None and not gone and not "".join(parts).strip():
+                error = AppError("parse_empty", EMPTY_TURN)
+        except Exception:
+            error = AppError("unknown", "Falló el cliente al leer el stream. No se asumió choices[0].")
+        finally:
+            try:
+                _persist_turn(thread_id, model, parts, error, tin, tout)
+            except Exception:
+                if error is None:
+                    error = AppError("unknown", "No se pudo guardar el turno en disco.")
+            if error is None and tin:
+                try:
+                    db.set_token_ratio(thread_id, model, calibrate_ratio(ratio, tin, trimmed))
+                except Exception:
+                    pass
+        try:
+            if await request.is_disconnected():
+                return
+            if error is not None:
+                yield sse("error", {"error_class": error.error_class, "message": error.message})
+            yield sse("done", {"ok": error is None})
+        except Exception:
+            return
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+
 @app.post("/api/threads/{thread_id}/suggestions")
 async def post_suggestions(thread_id: str):
     thread, character, provider, model = _chat_ready(thread_id)
     history = db.list_messages(thread_id)
     assembled = suggestion_messages(history, character.get("name") or "")
-    trimmed = trim_messages(assembled, clamp_context(thread.get("context_tokens")), 900)
+    trimmed = trim_messages(assembled, clamp_context(thread.get("context_tokens")), 900, db.token_ratio(thread, model))
     text, err, tin, tout = await complete_chat(
         provider["base_url"],
         provider["api_key"],

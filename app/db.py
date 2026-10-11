@@ -115,6 +115,8 @@ def init() -> None:
         )
         _add_column(conn, "threads", "voice_account_id", "TEXT")
         _add_column(conn, "threads", "speak", "INTEGER NOT NULL DEFAULT 0")
+        _add_column(conn, "threads", "token_ratio", "REAL")
+        _add_column(conn, "threads", "token_ratio_model", "TEXT NOT NULL DEFAULT ''")
 
 
 def _row(row: sqlite3.Row | None) -> dict | None:
@@ -372,6 +374,20 @@ def update_thread(
             ),
         )
     return get_thread(thread_id)
+
+
+def token_ratio(thread: dict, model: str) -> float | None:
+    if thread.get("token_ratio_model") != model:
+        return None
+    return thread.get("token_ratio")
+
+
+def set_token_ratio(thread_id: str, model: str, ratio: float) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE threads SET token_ratio = ?, token_ratio_model = ? WHERE id = ?",
+            (ratio, model, thread_id),
+        )
 
 
 def delete_thread(thread_id: str) -> bool:
