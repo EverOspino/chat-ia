@@ -23,9 +23,7 @@ scene.add(hemi, key);
 let vrm = null;
 let rest = new Map();
 let clock = new THREE.Clock();
-let mouth = 0;
 let speaking = false;
-let localSpeak = false;
 let emotion = "idle";
 let emotionUntil = 0;
 const expr = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0, happy: 0, angry: 0, sad: 0, surprised: 0, relaxed: 0 };
@@ -70,9 +68,14 @@ function setStatus(text) {
   if (status) status.textContent = text || "";
 }
 
+let lastSize = "";
+
 function resize() {
   const w = canvas.clientWidth || 280;
   const h = canvas.clientHeight || 360;
+  // setSize reasigna el buffer del canvas: hacerlo en cada cuadro provocaba tirones.
+  if (lastSize === w + "x" + h) return;
+  lastSize = w + "x" + h;
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
@@ -110,22 +113,6 @@ function pickRestSmile() {
     || "happy";
 }
 
-function closeMouth() {
-  expression("aa", 0);
-  expression("a", 0);
-  expression("ih", 0);
-  expression("i", 0);
-  expression("ou", 0);
-  expression("u", 0);
-  expression("ee", 0);
-  expression("e", 0);
-  expression("oh", 0);
-  expression("o", 0);
-  expression("joy", 0);
-  const jaw = bone("jaw");
-  if (jaw) jaw.rotation.set(0, 0, 0);
-}
-
 function bone(name) {
   if (!vrm || !vrm.humanoid) return null;
   return vrm.humanoid.getNormalizedBoneNode(name);
@@ -136,15 +123,27 @@ let mixer = null;
 let clips = {};
 let idleAlts = [];
 let idleAction = null;
-let altAction = null;
-let altMix = 0;
-let altMixFrom = 0;
-let altMixTo = 0;
-let altMixStart = 0;
-let altMixDur = 700;
+// Capas sobre el reposo: cada una sube y baja su peso con su propio fundido, así nunca hay cortes.
+let layers = [];
 let nextIdleAlt = 0;
-const CLIP_FADE = 0.7;
-const KISS_FADE = 1.2;
+const ARM_SPREAD = 0.16;
+const IDLE_FADE = 0.9;
+const GESTURE_FADE = 0.55;
+// Las variantes de reposo no llegan al 100%: "Looking Around" completo le da la espalda a la cámara.
+const IDLE_ALT_WEIGHT = 0.8;
+// Los gestos duran entre estos segundos: "Clapping" dura 0,8 s y se repite; "Angry" dura 19 s y se corta.
+const GESTURE_MIN = 2.4;
+const GESTURE_MAX = 4.5;
+const GESTURES = {
+  kiss: /kiss/i,
+  crazy: /crazy/i,
+  angry: /angry/i,
+  sad: /defeat/i,
+  clap: /clap/i,
+  thanks: /thank/i,
+};
+// Poses de reposo que sostienen objetos: sin el objeto, la mano queda rara.
+const IDLE_SKIP = /dwarf|holding|briefcase/i;
 
 function rawBone(name) {
   if (!vrm || !vrm.humanoid) return null;
@@ -226,14 +225,6 @@ function applyArmPose() {
   }
 }
 
-function unstickArms() {
-  const spread = 0.16;
-  const left = bone("leftUpperArm");
-  const right = bone("rightUpperArm");
-  if (left) left.rotation.z -= spread;
-  if (right) right.rotation.z += spread;
-}
-
 function ensureIdle() {
   if (!mixer || !clips.idle) return;
   if (idleAction) return;
@@ -245,131 +236,121 @@ function ensureIdle() {
   idleAction.play();
 }
 
-function altName() {
-  return (altAction && altAction.getClip() && altAction.getClip().name) || "";
+function currentLayer() {
+  return layers.find((layer) => layer.target > 0) || null;
+}
+
+function layerName() {
+  const layer = currentLayer();
+  return layer ? layer.key : "";
 }
 
 function kissPlaying() {
-  return altName() === "kiss";
+  return layerName() === "kiss";
 }
 
 function gesturePlaying() {
-  const n = altName();
-  return n === "kiss" || n === "crazy";
+  const layer = currentLayer();
+  return Boolean(layer && layer.gesture);
 }
 
-function setAltMix(to, dur) {
-  altMixFrom = altMix;
-  altMixTo = to;
-  altMixStart = performance.now();
-  altMixDur = dur;
-}
-
-function startAlt(key, force) {
+function playLayer(key, gesture) {
   const clip = clips[key];
-  if (!mixer || !clip) return;
-  if (altAction && !force) return;
-  if (altAction && force) {
-    altAction.stop();
-    altAction = null;
-    altMix = 0;
-  }
+  if (!mixer || !clip) return false;
   ensureIdle();
-  const gesture = key === "kiss" || key === "crazy";
-  altAction = mixer.clipAction(clip);
-  altAction.setLoop(THREE.LoopOnce, 1);
-  altAction.clampWhenFinished = false;
-  altAction.reset();
-  altAction.enabled = true;
-  altAction.setEffectiveTimeScale(1);
-  altAction.setEffectiveWeight(0);
-  altAction.play();
-  setAltMix(gesture ? 0.94 : 0.6, (gesture ? KISS_FADE : CLIP_FADE) * 1000);
-}
-
-function stopAlt() {
-  if (!altAction || !idleAction) return;
-  if (altMixTo === 0) return;
-  const clip = altAction.getClip();
-  if (clip && clip.duration) {
-    altAction.time = Math.min(altAction.time, Math.max(0, clip.duration - 0.02));
+  for (const layer of layers) layer.target = 0;
+  const action = mixer.clipAction(clip);
+  let layer = layers.find((item) => item.action === action);
+  if (!layer) {
+    layer = { action, key, weight: 0, target: 0, fade: IDLE_FADE, gesture: false };
+    layers.push(layer);
   }
-  altAction.paused = true;
-  altAction.clampWhenFinished = true;
-  idleAction.paused = false;
-  idleAction.enabled = true;
-  idleAction.play();
-  setAltMix(0, (gesturePlaying() ? KISS_FADE : CLIP_FADE) * 1000);
+  const reps = gesture && clip.duration < GESTURE_MIN ? Math.ceil(GESTURE_MIN / clip.duration) : 1;
+  // Un clip nuevo arranca con peso 1: sin esto se veía un cuadro entero del gesto antes del fundido.
+  const w = layer.weight;
+  action.setEffectiveWeight((layer.max || 1) * w * w * (3 - 2 * w));
+  action.reset();
+  // Ida y vuelta en vez de repetir: el último cuadro de "Clapping" no empalma con el primero y la mano saltaba.
+  action.setLoop(reps > 1 ? THREE.LoopPingPong : THREE.LoopOnce, reps);
+  action.clampWhenFinished = true;
+  action.enabled = true;
+  action.setEffectiveTimeScale(1);
+  action.play();
+  layer.elapsed = 0;
+  layer.length = gesture ? Math.min(clip.duration * reps, GESTURE_MAX) : clip.duration;
+  layer.key = key;
+  layer.gesture = gesture;
+  layer.fade = gesture ? GESTURE_FADE : IDLE_FADE;
+  layer.max = gesture ? 1 : IDLE_ALT_WEIGHT;
+  layer.target = 1;
+  return true;
 }
 
-function updateFade(now) {
-  const span = Math.max(altMixDur, 1);
-  const t = Math.min(1, (now - altMixStart) / span);
-  const k = t * t * (3 - 2 * t);
-  altMix = altMixFrom + (altMixTo - altMixFrom) * k;
-  if (t >= 1) altMix = altMixTo;
-  if (idleAction) idleAction.setEffectiveWeight(1 - altMix);
-  if (altAction) altAction.setEffectiveWeight(altMix);
-  if (altMixTo === 0 && altMix <= 0.001 && altAction) {
-    altAction.setEffectiveWeight(0);
-    altAction.paused = true;
-    altAction.enabled = false;
-    altAction = null;
-    altMix = 0;
-    altMixFrom = 0;
+function fadeOutLayers() {
+  for (const layer of layers) layer.target = 0;
+}
+
+function updateLayers(dt) {
+  let others = 0;
+  for (const layer of layers) {
+    layer.elapsed += dt;
+    // Antes de que termine se empieza a volver al reposo: si el clip acaba antes, su último cuadro queda fijo.
+    if (layer.target > 0 && layer.length - layer.elapsed <= layer.fade) layer.target = 0;
+    const step = dt / Math.max(layer.fade, 0.05);
+    if (layer.weight < layer.target) layer.weight = Math.min(layer.target, layer.weight + step);
+    else layer.weight = Math.max(layer.target, layer.weight - step);
+    const w = layer.weight;
+    const eased = (layer.max || 1) * w * w * (3 - 2 * w);
+    layer.action.setEffectiveWeight(eased);
+    others += eased;
   }
+  layers = layers.filter((layer) => {
+    if (layer.target > 0 || layer.weight > 0) return true;
+    layer.action.stop();
+    layer.action.enabled = false;
+    return false;
+  });
+  if (idleAction) idleAction.setEffectiveWeight(Math.max(0, 1 - Math.min(1, others)));
 }
 
-function updateIdleClips(now) {
+// Un gesto nuevo reemplaza al que esté sonando (con fundido); el límite de uno por respuesta lo pone quien llama.
+function playGesture(key) {
+  if (!clips[key] || layerName() === key) return false;
+  return playLayer(key, true);
+}
+
+function updateIdleClips(now, dt) {
   if (!clips.idle) return;
   ensureIdle();
-  updateFade(now);
-  if (emotion === "kiss" || emotion === "crazy" || gesturePlaying()) {
-    if (altAction) {
-      const clip = altAction.getClip();
-      const tail = gesturePlaying() ? KISS_FADE : CLIP_FADE;
-      if (clip && clip.duration - altAction.time <= tail) stopAlt();
-    }
-    return;
-  }
-  if (speaking || emotion !== "idle") {
-    if (altAction && !gesturePlaying()) stopAlt();
-    return;
-  }
-  if (altAction) {
-    const clip = altAction.getClip();
-    if (clip && clip.duration - altAction.time <= CLIP_FADE) stopAlt();
-    return;
-  }
-  if (!nextIdleAlt) nextIdleAlt = now + 12000 + Math.random() * 8000;
+  updateLayers(dt);
+  if (speaking && currentLayer() && !gesturePlaying()) fadeOutLayers();
+  if (currentLayer() || speaking || emotion !== "idle") return;
+  if (!nextIdleAlt) nextIdleAlt = now + 7000 + Math.random() * 6000;
   if (now < nextIdleAlt) return;
-  nextIdleAlt = now + 16000 + Math.random() * 22000;
+  nextIdleAlt = now + 9000 + Math.random() * 13000;
   const roll = Math.random();
-  if (clips.kiss && roll < 0.12) {
+  if (clips.kiss && roll < 0.07) {
     emotion = "kiss";
     emotionUntil = now + 3200;
-    startAlt("kiss", true);
+    playGesture("kiss");
     return;
   }
-  if (clips.crazy && roll < 0.22) {
+  if (clips.crazy && roll < 0.12) {
     emotion = "crazy";
     emotionUntil = now + 4000;
-    startAlt("crazy", true);
+    playGesture("crazy");
     return;
   }
   if (!idleAlts.length) return;
-  startAlt(idleAlts[Math.floor(Math.random() * idleAlts.length)]);
+  playLayer(idleAlts[Math.floor(Math.random() * idleAlts.length)], false);
 }
 
 async function loadClips() {
   clips = {};
   idleAlts = [];
   idleAction = null;
-  altAction = null;
-  altMix = 0;
-  altMixFrom = 0;
-  altMixTo = 0;
-  nextIdleAlt = performance.now() + 10000 + Math.random() * 10000;
+  layers = [];
+  nextIdleAlt = performance.now() + 7000 + Math.random() * 6000;
   if (mixer) mixer.stopAllAction();
   if (!vrm) return;
   mixer = new THREE.AnimationMixer(vrm.scene);
@@ -381,19 +362,24 @@ async function loadClips() {
     files = ["Idle.fbx"];
   }
   const base = files.find((n) => n.replace(/\.fbx$/i, "").toLowerCase() === "idle") || "Idle.fbx";
-  const extras = files.filter((n) => n !== base && !/dwarf/i.test(n) && (/idle/i.test(n) || /looking around/i.test(n)) && !/kiss|angry|clap|defeat|thank/i.test(n));
-  const kissFile = files.find((n) => /kiss/i.test(n));
-  const crazyFile = files.find((n) => /crazy/i.test(n));
-  const toLoad = [base, ...extras];
-  if (kissFile) toLoad.push(kissFile);
-  if (crazyFile) toLoad.push(crazyFile);
+  const gestureFiles = {};
+  for (const [key, re] of Object.entries(GESTURES)) {
+    const found = files.find((n) => re.test(n));
+    if (found) gestureFiles[found] = key;
+  }
+  const extras = files.filter((n) => n !== base && !gestureFiles[n] && !IDLE_SKIP.test(n) && /idle|looking around/i.test(n));
+  const toLoad = [base, ...extras, ...Object.keys(gestureFiles)];
   await Promise.all(toLoad.map(async (file) => {
-    const key = file === kissFile ? "kiss" : file === crazyFile ? "crazy" : file === base ? "idle" : "alt:" + file;
+    const gestureKey = gestureFiles[file];
+    const key = gestureKey || (file === base ? "idle" : "alt:" + file);
     try {
-      const clip = await loadMixamoClip("/api/animations/file?name=" + encodeURIComponent(file), vrm, key);
+      // Los gestos se anclan en el lugar: si el clip camina, el personaje se saldría del cuadro.
+      const clip = await loadMixamoClip("/api/animations/file?name=" + encodeURIComponent(file), vrm, key, {
+        inPlace: Boolean(gestureKey),
+      });
       if (!clip) return;
       clips[key] = clip;
-      if (key !== "idle" && key !== "kiss" && key !== "crazy") idleAlts.push(key);
+      if (!gestureKey && key !== "idle") idleAlts.push(key);
     } catch {
       return;
     }
@@ -447,17 +433,28 @@ function rememberRest() {
   }
 }
 
+// Suavizado que no depende de los cuadros por segundo: mismo ritmo en 60 o en 144 Hz.
+function ease(rate, dt) {
+  return 1 - Math.exp(-rate * dt);
+}
+
+// Gestos del cuerpo según lo que dice el texto. A lo sumo uno por respuesta.
+const EMOTION_GESTURE = { kiss: "kiss", crazy: "crazy", angry: "angry", sad: "sad", laugh: "clap", thanks: "thanks" };
+let turnLength = 0;
+let turnGestured = false;
+
 function readTags(text) {
   const blob = (text || "").toLowerCase();
   if (/beso|besu|besa |un beso|blow a kiss|manda un beso|sopla un beso/.test(blob)) return "kiss";
   if (/crazy|loco|loca|locura|demente|chalad|insensat/.test(blob)) return "crazy";
-  const scores = { laugh: 0, angry: 0, surprise: 0, lean_in: 0, sad: 0 };
+  const scores = { laugh: 0, angry: 0, surprise: 0, lean_in: 0, sad: 0, thanks: 0 };
   const rules = [
-    ["laugh", /ríe|rie |risa|jaj[aeo]|jeje|jiji|carcaj|sonríe|sonrie|se ríe|haha|jaja/g],
+    ["laugh", /ríe|rie |risa|jaj[aeo]|jeje|jiji|carcaj|sonríe|sonrie|se ríe|haha|jaja|aplaud/g],
     ["angry", /enoja|enfada|grita|furios|rabia|odio|carajo|basta|ceño|molesta/g],
     ["surprise", /sorpren|asombr|abre los ojos|no puede ser|en serio|wow|¡eh|boquiabiert/g],
     ["lean_in", /acerca|inclina|se acerca|susurr|al oído|muy cerca|horcajadas|mima|caricia|cerca de la oreja/g],
-    ["sad", /triste|llora|suspir|pena|solloz|lástima|lastima|melancol/g],
+    ["sad", /triste|llora|suspir|pena|solloz|lástima|lastima|melancol|abatid|derrotad/g],
+    ["thanks", /gracias|agradec|te lo debo/g],
   ];
   for (const [name, re] of rules) {
     const hits = blob.match(re);
@@ -476,22 +473,17 @@ function readTags(text) {
 }
 
 function aimEmotion() {
-  const t = performance.now();
   target.happy = 0;
   target.angry = 0;
   target.sad = 0;
   target.surprised = 0;
   target.relaxed = 0;
-  target.ih = 0;
-  target.ou = 0;
-  target.ee = 0;
-  target.oh = 0;
   if (emotion === "laugh") {
     target.happy = 0.7;
     target.relaxed = 0.4;
-  } else if (emotion === "kiss") {
-    target.ou = 0.7;
-    target.oh = 0.45;
+  } else if (emotion === "thanks") {
+    target.happy = 0.45;
+    target.relaxed = 0.35;
   } else if (emotion === "crazy") {
     target.surprised = 0.55;
     target.happy = 0.35;
@@ -499,9 +491,9 @@ function aimEmotion() {
   } else if (emotion === "angry") target.angry = 0.75;
   else if (emotion === "surprise") target.surprised = 0.7;
   else if (emotion === "sad") target.sad = 0.65;
-  else target.happy = 0;
 }
 
+// Microgestos de la cara en reposo. Solo mueven el objetivo: la transición la hace el suavizado.
 function updateIdleFace(now) {
   if (emotion !== "idle" && emotion !== "speak") return;
   if (now >= facePulse.next) {
@@ -517,18 +509,8 @@ function updateIdleFace(now) {
     facePulse.next = facePulse.until + 15000 + Math.random() * 10000;
   }
   const on = now < facePulse.until;
-  if (facePulse.kind === "surprise" && on) {
-    target.surprised = 0.85;
-    expr.surprised = 0.85;
-    expression("surprised", 0.85);
-  } else if (facePulse.kind === "giggle" && on) {
-    target.relaxed = 0.55;
-    expr.relaxed = 0.55;
-    expression("relaxed", 0.55);
-    if (restSmileName) expression(restSmileName, 0.5);
-  } else if (facePulse.kind === "wink" && on && restSmileName) {
-    expression(restSmileName, 0.4);
-  }
+  if (facePulse.kind === "surprise" && on) target.surprised = 0.6;
+  else if (facePulse.kind === "giggle" && on) target.relaxed = 0.5;
 }
 
 function scheduleBlink(now) {
@@ -537,7 +519,7 @@ function scheduleBlink(now) {
   blinksLeft = 0;
 }
 
-function updateBlink(now) {
+function updateBlink(now, dt) {
   if (facePulse.kind === "wink" && now < facePulse.until) {
     const left = facePulse.side === "left";
     expression("blink", 0);
@@ -546,6 +528,7 @@ function updateBlink(now) {
     return;
   }
   if (!nextBlink) scheduleBlink(now + 600);
+  // Al mover mucho la mirada se parpadea: así lo hacen las personas.
   if (now >= nextBlink && blinkTarget === 0 && blink < 0.08) {
     if (blinksLeft <= 0) blinksLeft = Math.random() < 0.16 ? 2 : 1;
     blinkTarget = 1;
@@ -558,29 +541,81 @@ function updateBlink(now) {
     if (blinksLeft > 0) nextBlink = now + 90 + Math.random() * 70;
     else scheduleBlink(now);
   }
-  blink += (blinkTarget - blink) * (blinkTarget === 1 ? 0.62 : 0.38);
+  blink += (blinkTarget - blink) * ease(blinkTarget === 1 ? 45 : 22, dt);
   expression("blink", blink);
   expression("blinkLeft", blink);
   expression("blinkRight", blink);
 }
 
-function updateLook(now) {
-  look.x += (lookGoal.x - look.x) * 0.1;
-  look.y += (lookGoal.y - look.y) * 0.1;
+// La mirada salta de un punto a otro (rápido) y la cabeza la sigue (lento).
+let headLook = { x: 0, y: 0 };
+
+function updateLook(now, dt) {
+  if (now >= nextLook) {
+    const toUser = speaking ? 0.7 : 0.4;
+    if (Math.random() < toUser) lookGoal = { x: 0, y: 0 };
+    else lookGoal = { x: (Math.random() * 2 - 1) * 0.45, y: (Math.random() * 2 - 1) * 0.22 };
+    const jump = Math.hypot(lookGoal.x - look.x, lookGoal.y - look.y);
+    if (jump > 0.35 && blinkTarget === 0 && Math.random() < 0.5) nextBlink = now;
+    nextLook = now + (speaking ? 1600 : 1200) + Math.random() * 2800;
+  }
+  look.x += (lookGoal.x - look.x) * ease(22, dt);
+  look.y += (lookGoal.y - look.y) * ease(22, dt);
+  headLook.x += (look.x - headLook.x) * ease(2.2, dt);
+  headLook.y += (look.y - headLook.y) * ease(2.2, dt);
   expression("lookLeft", Math.max(0, -look.x));
   expression("lookRight", Math.max(0, look.x));
   expression("lookUp", Math.max(0, look.y));
   expression("lookDown", Math.max(0, -look.y));
 }
 
-function amplitude() {
-  if (localSpeak) return 0.35 + Math.sin(performance.now() / 90) * 0.2;
-  if (!analyser || !freq) return 0;
-  analyser.getByteFrequencyData(freq);
+// Habla: con audio (Fish) cada vocal sale de una franja del espectro;
+// sin audio (voz del navegador) se generan sílabas con vocal y apertura al azar, empujadas por cada palabra.
+const VOWELS = ["aa", "aa", "oh", "ee", "ih", "ou", "aa", "oh"];
+let audioDriven = false;
+let syllable = { start: 0, until: 0, shape: "aa", open: 0 };
+let speechLevel = 0;
+let nodImpulse = 0;
+
+function nextSyllable(now) {
+  const pause = Math.random() < 0.1;
+  syllable = {
+    start: now,
+    until: now + (pause ? 140 + Math.random() * 120 : 95 + Math.random() * 120),
+    shape: VOWELS[Math.floor(Math.random() * VOWELS.length)],
+    open: pause ? 0 : 0.3 + Math.random() * 0.45,
+  };
+}
+
+function band(from, to) {
   let sum = 0;
-  const n = Math.min(freq.length, 24);
-  for (let i = 0; i < n; i += 1) sum += freq[i];
-  return Math.min(1, sum / n / 140);
+  for (let i = from; i < to && i < freq.length; i += 1) sum += freq[i];
+  return sum / Math.max(1, to - from) / 255;
+}
+
+function speechShape(now) {
+  const shape = { aa: 0, ih: 0, ou: 0, ee: 0, oh: 0 };
+  if (!speaking) return { shape, level: 0 };
+  if (audioDriven && analyser && freq) {
+    analyser.getByteFrequencyData(freq);
+    const low = band(1, 5);
+    const mid = band(5, 14);
+    const high = band(14, 40);
+    const level = Math.min(1, (low * 0.8 + mid + high * 0.6) * 1.6);
+    const total = low + mid + high + 1e-4;
+    shape.ou = level * (low / total) * 0.9;
+    shape.oh = level * (low / total) * 0.5;
+    shape.aa = level * (mid / total) * 1.1;
+    shape.ee = level * (high / total) * 0.8;
+    shape.ih = level * (high / total) * 0.4;
+    return { shape, level };
+  }
+  if (now >= syllable.until) nextSyllable(now);
+  const t = Math.min(1, (now - syllable.start) / Math.max(1, syllable.until - syllable.start));
+  const level = syllable.open * Math.sin(Math.PI * t);
+  shape[syllable.shape] = level;
+  if (syllable.shape !== "aa") shape.aa = level * 0.3;
+  return { shape, level };
 }
 
 function hookAudio(node) {
@@ -591,6 +626,7 @@ function hookAudio(node) {
     const source = audioCtx.createMediaElementSource(node);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.55;
     freq = new Uint8Array(analyser.frequencyBinCount);
     source.connect(analyser);
     analyser.connect(audioCtx.destination);
@@ -598,6 +634,32 @@ function hookAudio(node) {
   } catch {
     analyser = null;
   }
+}
+
+// Desplazamientos sumados encima de la animación. Se deshacen antes del próximo cuadro
+// para que no se acumulen en huesos que el clip no mueve.
+const offsets = new Map();
+
+function addOffset(name, x, y, z) {
+  const node = bone(name);
+  if (!node) return;
+  const prev = offsets.get(node) || { x: 0, y: 0, z: 0 };
+  prev.x += x;
+  prev.y += y;
+  prev.z += z;
+  offsets.set(node, prev);
+  node.rotation.x += x;
+  node.rotation.y += y;
+  node.rotation.z += z;
+}
+
+function clearOffsets() {
+  for (const [node, off] of offsets) {
+    node.rotation.x -= off.x;
+    node.rotation.y -= off.y;
+    node.rotation.z -= off.z;
+  }
+  offsets.clear();
 }
 
 async function loadModel(name) {
@@ -608,8 +670,8 @@ async function loadModel(name) {
   }
   clips = {};
   idleAction = null;
-  altAction = null;
-  altMix = 0;
+  layers = [];
+  offsets.clear();
   if (vrm) {
     scene.remove(vrm.scene);
     VRMUtils.deepDispose(vrm.scene);
@@ -640,70 +702,65 @@ function tick() {
   resize();
   const dt = Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
+  const t = now / 1000;
   if (emotionUntil && now > emotionUntil && !speaking) emotion = "idle";
   if (speaking && emotion === "idle") emotion = "speak";
   aimEmotion();
   updateIdleFace(now);
-  mouth += (amplitude() - mouth) * 0.35;
-  target.aa = speaking ? Math.min(mouth * 0.8, 0.4) : 0;
+  const { shape, level } = speechShape(now);
+  speechLevel += (level - speechLevel) * ease(18, dt);
+  const faceRate = ease(9, dt);
+  const mouthRate = ease(24, dt);
   for (const key of Object.keys(expr)) {
-    expr[key] += (target[key] - expr[key]) * 0.28;
+    const mouthKey = key in shape;
+    let goal = mouthKey ? Math.min(shape[key], 0.75) : target[key];
+    if (mouthKey && emotion === "kiss" && !speaking) goal = key === "ou" ? 0.7 : key === "oh" ? 0.45 : 0;
+    expr[key] += (goal - expr[key]) * (mouthKey ? mouthRate : faceRate);
     expression(key, expr[key]);
   }
-  if (!speaking && !kissPlaying() && emotion !== "kiss") closeMouth();
-  if (restSmileName && emotion !== "angry" && emotion !== "sad" && facePulse.kind !== "surprise") {
+  if (restSmileName && emotion !== "angry" && emotion !== "sad" && !(facePulse.kind === "surprise" && now < facePulse.until)) {
     const pulseOn = now < facePulse.until;
-    let smile = 0.32;
-    if (emotion === "kiss") smile = 0.4;
-    else if (pulseOn && facePulse.kind === "giggle") smile = 0.5;
+    let smile = 0.3;
+    if (emotion === "kiss" || emotion === "thanks") smile = 0.4;
+    else if (emotion === "laugh" || (pulseOn && facePulse.kind === "giggle")) smile = 0.5;
     else if (pulseOn && facePulse.kind === "wink") smile = 0.4;
     expression(restSmileName, smile);
   }
-  if (emotion === "laugh") {
-    expression("happy", 0.7);
-    expression("relaxed", 0.42);
-    if (restSmileName) expression(restSmileName, 0.5);
-  }
-  updateBlink(now);
-  updateLook(now);
-  updateIdleClips(now);
+  updateBlink(now, dt);
+  updateLook(now, dt);
+
+  clearOffsets();
+  updateIdleClips(now, dt);
   if (mixer) mixer.update(dt);
-  if (!speaking && !kissPlaying() && emotion !== "kiss") closeMouth();
-  if (clips.idle) unstickArms();
-  const ht = now / 1000;
-  const head = bone("head");
-  const neck = bone("neck");
-  if (head) {
-    head.rotation.y += Math.sin(ht * 0.28) * 0.006 + look.x * 0.03;
-    head.rotation.x += Math.sin(ht * 0.35) * 0.004;
+  if (clips.idle) {
+    // Separa un poco los brazos del cuerpo. Va como desplazamiento (se deshace cada cuadro):
+    // three.js no reescribe un hueso si el clip no cambió, y sumarlo directo se acumulaba y daba un salto.
+    addOffset("leftUpperArm", 0, 0, -ARM_SPREAD);
+    addOffset("rightUpperArm", 0, 0, ARM_SPREAD);
   }
-  if (neck) {
-    neck.rotation.y += Math.sin(ht * 0.28) * 0.003;
-  }
+
+  // Encima de la animación: respiración, cabeza que sigue a la mirada, microvaivén y asentir al hablar.
+  const breath = Math.sin(t * Math.PI * 2 * 0.24);
+  addOffset("chest", breath * 0.012, 0, 0);
+  addOffset("upperChest", breath * 0.008, 0, 0);
+  addOffset("leftShoulder", 0, 0, breath * 0.012);
+  addOffset("rightShoulder", 0, 0, -breath * 0.012);
+  nodImpulse += (0 - nodImpulse) * ease(6, dt);
+  const sway = Math.sin(t * 0.31) * 0.012 + Math.sin(t * 0.73 + 1.3) * 0.006;
+  const tilt = Math.sin(t * 0.23 + 0.6) * 0.014;
+  const nod = speechLevel * 0.06 + nodImpulse;
+  addOffset("head", -headLook.y * 0.09 + nod + Math.sin(t * 0.41) * 0.006, headLook.x * 0.16 + sway, tilt);
+  addOffset("neck", nod * 0.4, headLook.x * 0.06 + sway * 0.5, 0);
+  const lean = emotion === "lean_in" ? -0.07 : speaking ? -0.025 : 0;
+  addOffset("spine", lean, 0, 0);
+
   if (!clips.idle) {
-    const t = now / 1000;
-    const sway = Math.sin(t * 0.65) * 0.035;
     const drift = Math.sin(t * 0.37 + 0.8) * 0.02;
-    const breath = Math.sin(t * 1.15) * 0.012;
     const hips = bone("hips");
     const hipRest = rest.get("hips");
     if (hips && hipRest) {
-      hips.rotation.y = THREE.MathUtils.lerp(hips.rotation.y, hipRest.y + sway, 0.06);
-      hips.rotation.z = THREE.MathUtils.lerp(hips.rotation.z, hipRest.z + drift * 0.35, 0.06);
-    }
-    const chest = bone("chest");
-    if (chest && rest.get("chest")) {
-      const base = rest.get("chest");
-      const lean = emotion === "lean_in" ? -0.1 : (speaking ? -0.035 : 0) + sway * 0.25;
-      chest.rotation.x = THREE.MathUtils.lerp(chest.rotation.x, base.x + lean + breath, 0.08);
-      chest.rotation.y = THREE.MathUtils.lerp(chest.rotation.y, base.y + sway * 0.4, 0.08);
-    }
-    const head = bone("head");
-    const headRest = rest.get("head");
-    if (head && headRest) {
-      head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, headRest.y - sway * 0.55 + drift, 0.07);
-      head.rotation.z = THREE.MathUtils.lerp(head.rotation.z, headRest.z - drift * 0.8, 0.07);
-      head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, headRest.x + Math.sin(t * 0.5) * 0.015, 0.07);
+      hips.rotation.y = THREE.MathUtils.lerp(hips.rotation.y, hipRest.y + Math.sin(t * 0.65) * 0.035, ease(4, dt));
+      hips.rotation.z = THREE.MathUtils.lerp(hips.rotation.z, hipRest.z + drift * 0.35, ease(4, dt));
     }
     applyArmPose();
   }
@@ -714,25 +771,32 @@ function tick() {
 window.addEventListener("chat-ia-scene", (event) => {
   const detail = event.detail || {};
   if (detail.type === "line" && detail.text) {
+    // Un texto más corto que el anterior es una respuesta nueva: vuelve a permitir un gesto.
+    if (detail.text.length < turnLength) turnGestured = false;
+    turnLength = detail.text.length;
     const next = readTags(detail.text);
-    if (next !== "speak" && next !== "idle") {
+    if (next !== "speak" && next !== "idle" && next !== emotion) {
       emotion = next;
       emotionUntil = performance.now() + (next === "kiss" || next === "crazy" ? 3500 : 4200);
-      if (next === "kiss" || next === "crazy") {
-        if (altName() !== next) startAlt(next, true);
-      }
+      const gesture = EMOTION_GESTURE[next];
+      if (gesture && !turnGestured && playGesture(gesture)) turnGestured = true;
     }
   }
   if (detail.type === "audio-start") {
     speaking = true;
-    localSpeak = Boolean(detail.local);
+    audioDriven = Boolean(detail.audio);
     if (detail.audio) hookAudio(detail.audio);
+    syllable.until = 0;
     if (emotion === "idle") emotion = "speak";
   }
-  if (detail.type === "boundary") mouth = 0.55;
+  if (detail.type === "boundary") {
+    // Cada palabra de la voz del navegador arranca una sílaba nueva y da un pequeño asentimiento.
+    syllable.until = 0;
+    nodImpulse = Math.min(0.05, nodImpulse + 0.02);
+  }
   if (detail.type === "audio-end") {
     speaking = false;
-    localSpeak = false;
+    audioDriven = false;
     if (emotion === "speak") emotion = "idle";
   }
 });

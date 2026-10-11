@@ -63,7 +63,7 @@ function findMixamo(asset, name) {
   return asset.getObjectByName(name) || asset.getObjectByName(name.replace("mixamorig", "mixamorig:"));
 }
 
-export async function loadMixamoClip(url, vrm, clipName) {
+export async function loadMixamoClip(url, vrm, clipName, opts = {}) {
   if (!fbxCache.has(url)) fbxCache.set(url, loader.loadAsync(url));
   const asset = await fbxCache.get(url);
   const clip = THREE.AnimationClip.findByName(asset.animations, "mixamo.com") || asset.animations[0];
@@ -108,6 +108,13 @@ export async function loadMixamoClip(url, vrm, clipName) {
       ));
     } else if (track instanceof THREE.VectorKeyframeTrack) {
       const values = track.values.map((v, i) => (vrm0 && i % 3 !== 1 ? -v : v) * hipsPositionScale);
+      if (opts.inPlace) {
+        // Deja la cadera donde arranca en X y Z: el gesto se hace sin desplazarse.
+        for (let i = 3; i < values.length; i += 3) {
+          values[i] = values[0];
+          values[i + 2] = values[2];
+        }
+      }
       tracks.push(new THREE.VectorKeyframeTrack(vrmNodeName + "." + propertyName, track.times, values));
     }
   }
