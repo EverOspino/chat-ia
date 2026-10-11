@@ -1,5 +1,17 @@
+function setMenu(open) {
+  document.body.classList.toggle("menu-open", open);
+  $("menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function bind() {
+  $("menu-btn").addEventListener("click", () => setMenu(!document.body.classList.contains("menu-open")));
+  $("menu-backdrop").addEventListener("click", () => setMenu(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && document.body.classList.contains("menu-open")) setMenu(false);
+  });
   document.body.addEventListener("click", async (event) => {
+    // En celular el menú es un panel lateral: se cierra al elegir algo.
+    if (event.target.closest("[data-tab], [data-thread], #new-thread-btn")) setMenu(false);
     const suggestPick = event.target.closest("[data-suggest]");
     if (suggestPick) {
       const text = state.suggestions[Number(suggestPick.dataset.suggest)];
@@ -16,6 +28,21 @@ function bind() {
     const retry = event.target.closest("[data-retry]");
     if (retry) {
       retryFrom(retry.dataset.retry);
+      return;
+    }
+    const copy = event.target.closest("[data-copy]");
+    if (copy) {
+      const msg = state.messages[Number(copy.dataset.copy)];
+      if (!msg || !msg.content) return;
+      if (!(await copyText(msg.content))) {
+        toast("No se pudo copiar.");
+        return;
+      }
+      const label = copy.querySelector("span");
+      if (label) {
+        label.textContent = "Copiado";
+        setTimeout(() => { label.textContent = "Copiar"; }, 1400);
+      }
       return;
     }
     const play = event.target.closest("[data-play]");
@@ -335,14 +362,26 @@ function bind() {
     $("chat-model").value = "";
     await loadModels($("chat-provider").value, true);
   });
-  const savedVol = Number(localStorage.getItem("chat-ia-volume"));
+  // Sin valor guardado, Number(null) daba 0 y la voz arrancaba muda.
+  const rawVol = localStorage.getItem("chat-ia-volume");
+  const savedVol = rawVol === null ? NaN : Number(rawVol);
   const vol = Number.isFinite(savedVol) ? Math.min(1, Math.max(0, savedVol)) : 1;
-  $("voice-volume").value = String(Math.round(vol * 100));
+  const showVolume = (value) => {
+    $("voice-volume").value = String(Math.round(value * 100));
+    $("volume-value").textContent = Math.round(value * 100) + "%";
+    $("voice-volume").style.setProperty("--fill", Math.round(value * 100) + "%");
+  };
+  showVolume(vol);
   Voice.setVolume(vol);
   $("voice-volume").addEventListener("input", () => {
     const next = Number($("voice-volume").value) / 100;
+    showVolume(next);
     Voice.setVolume(next);
     localStorage.setItem("chat-ia-volume", String(next));
+  });
+  $("thread-search").addEventListener("input", () => {
+    state.threadQuery = $("thread-search").value;
+    renderThreads();
   });
   $("speak-toggle").addEventListener("click", () => {
     if ($("speak-toggle").disabled) return;

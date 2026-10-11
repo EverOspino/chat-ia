@@ -35,6 +35,7 @@ function navigate(tab, threadId, replace) {
 
 function setTab(tab) {
   state.tab = tab;
+  document.body.dataset.view = tab;
   for (const button of document.querySelectorAll("[data-tab]")) {
     button.classList.toggle("active", button.dataset.tab === tab);
   }

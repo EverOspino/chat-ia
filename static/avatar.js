@@ -63,6 +63,8 @@ let pan = {
   y: Number(localStorage.getItem("chat-ia-vrm-pan-y")) || 0,
 };
 let drag = null;
+// En pantalla vertical (celular) el chat tapa la mitad de abajo: se sube al personaje.
+let portrait = false;
 
 function setStatus(text) {
   if (status) status.textContent = text || "";
@@ -74,6 +76,11 @@ function resize() {
   renderer.setSize(w, h, false);
   camera.aspect = w / Math.max(h, 1);
   camera.updateProjectionMatrix();
+  const tall = camera.aspect < 0.8;
+  if (tall !== portrait) {
+    portrait = tall;
+    applyZoom();
+  }
 }
 
 function expression(name, value) {
@@ -411,14 +418,20 @@ function frameModel() {
   applyZoom();
 }
 
+function viewDistance() {
+  // En vertical se aleja: la cara queda arriba y la cintura justo sobre el chat.
+  return baseDistance * zoom * (portrait ? 1.6 : 1);
+}
+
 function applyZoom() {
   zoom = Math.min(2.4, Math.max(0.45, zoom));
   const limit = 1.4;
   pan.x = Math.min(limit, Math.max(-limit, pan.x));
   pan.y = Math.min(limit, Math.max(-limit, pan.y));
-  const dist = baseDistance * zoom;
+  const dist = viewDistance();
+  const lift = portrait ? 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) * 0.17 : 0;
   const x = lookAt.x + pan.x;
-  const y = lookAt.y + pan.y;
+  const y = lookAt.y + pan.y - lift;
   camera.position.set(x, y, lookAt.z + dist);
   camera.lookAt(x, y, lookAt.z);
   localStorage.setItem("chat-ia-vrm-zoom", String(zoom));
@@ -771,7 +784,7 @@ canvas.addEventListener("pointermove", (event) => {
   if (!drag) return;
   const w = Math.max(canvas.clientWidth, 1);
   const h = Math.max(canvas.clientHeight, 1);
-  const dist = baseDistance * zoom;
+  const dist = viewDistance();
   const worldH = 2 * dist * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
   const worldW = worldH * (w / h);
   pan.x = drag.panX - ((event.clientX - drag.x) / w) * worldW;

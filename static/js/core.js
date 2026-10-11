@@ -3,6 +3,7 @@ const state = {
   providers: [],
   characters: [],
   threads: [],
+  threadQuery: "",
   thread: null,
   messages: [],
   models: [],
@@ -27,11 +28,56 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function parseDate(iso) {
+  if (!iso) return null;
+  const d = new Date(String(iso).includes("T") ? iso : String(iso).replace(" ", "T"));
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function formatDate(iso) {
   if (!iso) return "";
-  const d = new Date(String(iso).includes("T") ? iso : String(iso).replace(" ", "T"));
-  if (Number.isNaN(d.getTime())) return String(iso).slice(0, 10);
+  const d = parseDate(iso);
+  if (!d) return String(iso).slice(0, 10);
   return d.toLocaleDateString("es", { day: "numeric", month: "short" });
+}
+
+function daysAgo(d) {
+  const start = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  return Math.round((start(new Date()) - start(d)) / 86400000);
+}
+
+function dayLabel(iso) {
+  const d = parseDate(iso);
+  if (!d) return "";
+  const ago = daysAgo(d);
+  if (ago === 0) return "Hoy";
+  if (ago === 1) return "Ayer";
+  return d.toLocaleDateString("es", { weekday: "long", day: "numeric", month: "long" });
+}
+
+function timeLabel(iso) {
+  const d = iso ? parseDate(iso) : new Date();
+  return d ? d.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" }) : "";
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // Algunos navegadores bloquean la API del portapapeles: se usa el método viejo.
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch { ok = false; }
+    area.remove();
+    return ok;
+  }
 }
 
 function initial(name) {

@@ -13,28 +13,62 @@ function fillSelect(select, items, placeholder, selected) {
   }
 }
 
+function threadGroup(iso) {
+  const d = parseDate(iso);
+  if (!d) return "Antes";
+  const ago = daysAgo(d);
+  if (ago <= 0) return "Hoy";
+  if (ago === 1) return "Ayer";
+  if (ago < 7) return "Esta semana";
+  return "Antes";
+}
+
 function renderThreads() {
   const list = $("thread-list");
   list.replaceChildren();
-  if (!state.threads.length) {
+  const note = (text) => {
     const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = "Todavía no hay conversaciones.";
+    p.className = "muted list-note";
+    p.textContent = text;
     list.appendChild(p);
+  };
+  if (!state.threads.length) {
+    note("Todavía no hay conversaciones.");
     return;
   }
-  for (const thread of state.threads) {
+  const query = (state.threadQuery || "").trim().toLowerCase();
+  const shown = state.threads.filter((thread) => {
+    if (!query) return true;
+    return [thread.title, thread.character_name].some((v) => String(v || "").toLowerCase().includes(query));
+  });
+  if (!shown.length) {
+    note("Nada coincide con esa búsqueda.");
+    return;
+  }
+  let group = "";
+  for (const thread of shown) {
+    const when = thread.updated_at || thread.created_at;
+    const label = threadGroup(when);
+    if (label !== group) {
+      group = label;
+      const head = document.createElement("p");
+      head.className = "list-group";
+      head.textContent = label;
+      list.appendChild(head);
+    }
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "thread-item" + (state.thread && state.thread.id === thread.id ? " active" : "");
     btn.dataset.thread = thread.id;
     const name = document.createElement("span");
     name.className = "thread-name";
-    name.textContent = thread.character_name || thread.title || "Nuevo hilo";
-    const date = document.createElement("span");
-    date.className = "thread-date";
-    date.textContent = formatDate(thread.updated_at || thread.created_at);
-    btn.append(name, date);
+    name.textContent = thread.title || thread.character_name || "Nuevo hilo";
+    const sub = document.createElement("span");
+    sub.className = "thread-sub";
+    sub.textContent = [thread.character_name, dayLabel(when) === "Hoy" ? timeLabel(when) : formatDate(when)]
+      .filter(Boolean)
+      .join(" · ");
+    btn.append(name, sub);
     list.appendChild(btn);
   }
 }
@@ -82,11 +116,39 @@ function renderMessages() {
     box.appendChild(p);
     return;
   }
+  let day = "";
   state.messages.forEach((msg, index) => {
     if (msg.role === "notice") return;
+    const label = dayLabel(msg.created_at) || "Hoy";
+    if (label !== day) {
+      day = label;
+      const sep = document.createElement("div");
+      sep.className = "day-sep";
+      const text = document.createElement("span");
+      text.textContent = label;
+      sep.appendChild(text);
+      box.appendChild(sep);
+    }
     box.appendChild(bubble(msg, index));
   });
   box.scrollTop = box.scrollHeight;
+}
+
+const ICONS = {
+  play: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l11-6.5z"/></svg>',
+  retry: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg>',
+};
+
+function turnAction(kind, label, data, withText) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = (kind === "retry" ? "retry" : kind === "play" ? "play-msg" : "copy-msg") + (withText ? " chip-btn" : " icon-btn");
+  btn.dataset[kind] = data;
+  btn.title = label;
+  btn.setAttribute("aria-label", label);
+  btn.innerHTML = ICONS[kind] + (withText ? "<span>" + label + "</span>" : "");
+  return btn;
 }
 
 function retryTarget(index) {
@@ -99,34 +161,45 @@ function retryTarget(index) {
 function bubble(msg, index) {
   const wrap = document.createElement("div");
   wrap.className = "turn " + msg.role;
+  const body = document.createElement("div");
+  body.className = "turn-body";
+  const name = (state.thread && state.thread.character_name) || "Personaje";
+  if (msg.role === "assistant") {
+    const face = document.createElement("div");
+    face.className = "avatar-dot turn-avatar";
+    face.setAttribute("aria-hidden", "true");
+    face.textContent = initial(name);
+    wrap.appendChild(face);
+    const meta = document.createElement("div");
+    meta.className = "turn-meta";
+    const who = document.createElement("strong");
+    who.textContent = name;
+    const when = document.createElement("span");
+    when.textContent = timeLabel(msg.created_at);
+    meta.append(who, when);
+    body.appendChild(meta);
+  }
   const node = document.createElement("div");
   node.className = "bubble " + msg.role;
   fillFormatted(node, msg.content);
-  wrap.appendChild(node);
+  body.appendChild(node);
   const actions = document.createElement("div");
   actions.className = "turn-actions";
-  if (msg.role === "assistant" && (msg.content || "").trim() && !state.streaming) {
-    const play = document.createElement("button");
-    play.type = "button";
-    play.className = "play-msg icon-btn";
-    play.dataset.play = String(index);
-    play.title = "Leer";
-    play.setAttribute("aria-label", "Leer mensaje");
-    play.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l11-6.5z"/></svg>';
-    actions.appendChild(play);
-  }
+  const done = (msg.content || "").trim() && !state.streaming;
   const target = retryTarget(index);
-  if (target && !state.streaming && (msg.role === "user" || msg.role === "assistant")) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "retry icon-btn";
-    btn.dataset.retry = target;
-    btn.title = "Reintentar";
-    btn.setAttribute("aria-label", "Reintentar");
-    btn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/></svg>';
-    actions.appendChild(btn);
+  if (msg.role === "assistant" && done) {
+    actions.appendChild(turnAction("play", "Leer", String(index), false));
+    if (target) actions.appendChild(turnAction("retry", "Regenerar", target, true));
+    actions.appendChild(turnAction("copy", "Copiar", String(index), true));
+  } else if (msg.role === "user") {
+    const when = document.createElement("span");
+    when.className = "turn-time";
+    when.textContent = timeLabel(msg.created_at);
+    actions.appendChild(when);
+    if (target && !state.streaming) actions.appendChild(turnAction("retry", "Reintentar", target, false));
   }
-  if (actions.childNodes.length) wrap.appendChild(actions);
+  if (actions.childNodes.length) body.appendChild(actions);
+  wrap.appendChild(body);
   return wrap;
 }
 

@@ -35,13 +35,18 @@ function chatControls() {
 function showThread(thread, messages) {
   state.thread = thread;
   state.messages = messages || [];
-  $("chat-title").textContent = thread ? thread.character_name || thread.title || "Nuevo hilo" : "Sin hilo";
-  $("chat-character").value = thread ? thread.character_name || "" : "";
+  const name = thread ? thread.character_name || "" : "";
+  $("chat-title").textContent = thread ? name || thread.title || "Nuevo hilo" : "Sin hilo";
+  $("chat-character").value = name;
+  $("chat-avatar").textContent = initial(name);
+  $("chat-avatar").classList.toggle("hidden", !name);
+  $("stage-name").textContent = name;
+  $("draft").placeholder = name ? "Escribí un mensaje a " + name + "…" : "Escribí un mensaje…";
   $("chat-model-badge").textContent = thread && thread.model ? thread.model : "";
-  $("chat-model-badge").classList.toggle("hidden", !(thread && thread.model));
-  $("chat-meta").textContent = thread
-    ? [thread.character_name, thread.provider_name].filter(Boolean).join(" · ")
-    : "";
+  const modelShort = thread && thread.model ? thread.model.split("/").pop().replace(/:free$/, " · free") : "";
+  $("chat-meta").textContent = thread ? [thread.provider_name, modelShort].filter(Boolean).join(" · ") : "";
+  $("chat-meta").title = thread && thread.model ? thread.model : "";
+  $("chat-meta").classList.toggle("hidden", !thread);
   $("chat-context").value = thread ? thread.context_tokens || 8192 : 8192;
   fillModelSelect($("chat-model"), thread && thread.provider_account_id, thread ? thread.model || "" : "");
   if (thread && $("chat-voice").querySelector(`option[value="${thread.voice_account_id || ""}"]`)) {

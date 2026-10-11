@@ -91,6 +91,21 @@ class BrowserMicTests(unittest.TestCase):
         )
         thread.raise_for_status()
         cls.thread_id = thread.json()["id"]
+        other_char = httpx.post(
+            cls.base + "/api/characters",
+            json={"fields": {"nombre": "Nora", "edad": "29"}},
+        )
+        other_char.raise_for_status()
+        other = httpx.post(
+            cls.base + "/api/threads",
+            json={
+                "character_id": other_char.json()["id"],
+                "provider_account_id": prov.json()["id"],
+                "model": "llama",
+            },
+        )
+        other.raise_for_status()
+        cls.other_thread_id = other.json()["id"]
         cls._pw = sync_playwright().start()
         cls._browser = None
         for channel in ("chrome", "msedge", None):
@@ -202,6 +217,19 @@ class BrowserMicTests(unittest.TestCase):
         self.assertLessEqual(last["y"] + last["height"], menu["y"] + menu["height"] + 2)
         items.nth(2).click()
         self.assertEqual(self.page.locator("#draft").input_value(), "tercera no cortada")
+
+    def test_thread_list_opens_other_thread(self):
+        self.page.locator(f'[data-thread="{self.other_thread_id}"]').click()
+        self.page.wait_for_function("() => document.getElementById('chat-title').textContent === 'Nora'")
+        self.assertIn(self.other_thread_id, self.page.url)
+
+    def test_mobile_menu_opens_and_closes(self):
+        self.page.set_viewport_size({"width": 375, "height": 812})
+        self.page.locator("#menu-btn").click()
+        self.page.wait_for_function("() => document.body.classList.contains('menu-open')")
+        self.page.locator('.rail [data-tab="character"]').click()
+        self.page.wait_for_function("() => !document.body.classList.contains('menu-open')")
+        self.assertTrue(self.page.url.endswith("/personajes"))
 
 
 if __name__ == "__main__":
