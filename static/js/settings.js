@@ -8,7 +8,9 @@ function fillVoiceForm(found) {
   $("v-voice").value = found.voice_id || "";
   $("v-test").disabled = false;
   $("v-delete").disabled = found.provider === "browser";
+  $("v-listed").classList.add("hidden");
   syncVoiceFields();
+  voiceHead();
   renderVoices();
   setStatus("voice-status", "");
 }
@@ -23,9 +25,55 @@ function fillProviderForm(found) {
   $("test-connection").disabled = false;
   $("clear-key").disabled = false;
   $("delete-provider").disabled = false;
+  const preset = state.presets.find((item) => item.base_url === found.base_url);
+  $("p-preset").value = preset ? preset.id : "";
   updateOrNote();
+  providerHead(found);
   renderProviders();
+  renderModels();
   setStatus("provider-status", "");
+}
+
+function providerHead(found) {
+  const name = $("p-name").value.trim();
+  $("provider-title").textContent = name || (found ? found.name : "Nueva conexión");
+  const badge = $("provider-badge");
+  if (!found) {
+    badge.textContent = "Sin guardar";
+    badge.className = "badge-status muted";
+    return;
+  }
+  const status = providerStatus(found);
+  badge.textContent = status.label;
+  badge.className = "badge-status " + status.kind;
+}
+
+function selectProvider(id) {
+  const found = state.providers.find((item) => item.id === id);
+  if (!found) return;
+  fillProviderForm(found);
+  loadModels(found.id);
+}
+
+function newProvider() {
+  state.editingProviderId = null;
+  state.clearKey = false;
+  $("provider-form").reset();
+  $("p-key").placeholder = "sk-…";
+  $("test-connection").disabled = true;
+  $("clear-key").disabled = true;
+  $("delete-provider").disabled = true;
+  updateOrNote();
+  providerHead(null);
+  renderProviders();
+  renderModels();
+  setStatus("provider-status", "");
+}
+
+function ensureProviderEditor() {
+  if (state.editingProviderId && state.providers.some((p) => p.id === state.editingProviderId)) return;
+  if (state.providers.length) selectProvider(state.providers[0].id);
+  else newProvider();
 }
 
 function snapshotSettings() {

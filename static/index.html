@@ -219,28 +219,183 @@
     </section>
 
     <section id="view-connect" class="view page-view hidden">
-      <div class="page">
+      <div class="page page-wide">
         <header class="page-head">
           <div>
             <h1>Conexiones</h1>
-            <p class="muted">OpenAI-compatible. Esta app no hace OAuth.</p>
+            <p class="muted">Gestioná tus proveedores y elegí un modelo.</p>
           </div>
-          <button type="button" id="new-provider-btn" class="primary">Nueva conexión</button>
+          <button type="button" id="new-provider-btn" class="primary head-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+            Nueva conexión
+          </button>
         </header>
-        <div id="provider-list" class="card-stack"></div>
+        <div class="split split-3">
+          <aside class="split-list glass-panel">
+            <h2 class="panel-title">Mis conexiones</h2>
+            <div id="provider-list" class="list"></div>
+          </aside>
+          <form id="provider-form" class="editor glass-panel">
+            <header class="editor-head">
+              <div class="avatar-dot icon-dot" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M9 9 7 11a3.2 3.2 0 0 0 4.5 4.5l2-2M15 15l2-2A3.2 3.2 0 0 0 12.5 8.5l-2 2"/></svg>
+              </div>
+              <h2 id="provider-title">Nueva conexión</h2>
+              <span id="provider-badge" class="badge-status muted hidden"></span>
+            </header>
+            <section class="form-section">
+              <label>Nombre
+                <input id="p-name" placeholder="Groq personal">
+              </label>
+              <label>Proveedor
+                <select id="p-preset">
+                  <option value="">Elegir…</option>
+                </select>
+              </label>
+              <label>URL base
+                <input id="p-url" placeholder="https://openrouter.ai/api/v1" required>
+              </label>
+              <label>Clave API
+                <span class="key-field">
+                  <input id="p-key" type="password" autocomplete="off" placeholder="sk-…">
+                  <button type="button" id="p-key-eye" class="icon-btn" title="Mostrar clave" aria-label="Mostrar clave" aria-pressed="false">
+                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+                  </button>
+                </span>
+              </label>
+              <p id="or-note" class="note hidden">OpenRouter muestra la key una sola vez. Si la perdés, Create Key de nuevo. No pongas /keys en la Base URL.</p>
+              <div class="editor-actions flush">
+                <button type="submit" class="primary">Guardar conexión</button>
+                <button type="button" id="test-connection" class="icon-text-btn" disabled>
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M8 5.5v13l11-6.5z"/></svg>
+                  Probar conexión
+                </button>
+              </div>
+              <p class="muted small-note">La prueba consulta los modelos sin enviar mensajes del personaje.</p>
+              <p id="provider-status" class="status"></p>
+            </section>
+            <details class="fold">
+              <summary>
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="M12 3.5 5 6v5.5c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6z"/></svg>
+                Administrar clave y eliminar conexión
+              </summary>
+              <div class="fold-body">
+                <p class="note">No pruebes diez veces seguidas: en algunos modelos free los fallos cuentan. Un 429 de noche suele ser el pool, no tu key.</p>
+                <div class="editor-actions flush">
+                  <button type="button" id="clear-key" disabled>Quitar key</button>
+                  <button type="button" id="delete-provider" class="danger-btn" disabled>Eliminar conexión</button>
+                </div>
+              </div>
+            </details>
+          </form>
+          <div class="side-stack">
+            <section class="glass-panel side-card">
+              <h2 class="panel-title">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><ellipse cx="12" cy="6" rx="7" ry="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M5 6v6c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V6M5 12v6c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5v-6"/></svg>
+                Modelos disponibles
+              </h2>
+              <label class="search">
+                <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m16 16 4 4"/></svg>
+                <input id="model-filter" type="search" placeholder="Buscar por nombre o ID…" aria-label="Buscar modelos" autocomplete="off">
+              </label>
+              <div id="model-results" class="list models"></div>
+            </section>
+            <section class="glass-panel side-card">
+              <h2 class="panel-title">
+                <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M12 7.5V12l3 2"/></svg>
+                Actividad reciente
+              </h2>
+              <div id="usage-list" class="usage-table"></div>
+              <p class="muted small-note">429: revisá los límites del proveedor.</p>
+            </section>
+          </div>
+        </div>
       </div>
     </section>
 
     <section id="view-voice" class="view page-view hidden">
-      <div class="page">
+      <div class="page page-wide">
         <header class="page-head">
           <div>
             <h1>Voces</h1>
-            <p class="muted">No es la cuenta del chat. El audio no va al modelo.</p>
+            <p class="muted">Dale voz a las respuestas de tus personajes.</p>
           </div>
-          <button type="button" id="new-voice-btn" class="primary">Nueva voz</button>
+          <button type="button" id="new-voice-btn" class="primary head-btn">
+            <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+            Nueva voz
+          </button>
         </header>
-        <div id="voice-list" class="card-stack"></div>
+        <div class="split">
+          <aside class="split-list glass-panel">
+            <h2 class="panel-title">Mis voces</h2>
+            <div id="voice-list" class="list"></div>
+          </aside>
+          <form id="voice-form" class="editor glass-panel">
+            <header class="editor-head">
+              <div class="avatar-dot icon-dot" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="20" height="20"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/></svg>
+              </div>
+              <h2 id="voice-title">Nueva voz</h2>
+              <span id="voice-badge" class="badge-status muted hidden"></span>
+            </header>
+            <section class="form-section">
+              <label>Nombre
+                <input id="v-name" placeholder="Fish personal">
+              </label>
+              <label>Motor de voz
+                <select id="v-provider">
+                  <option value="browser">Navegador</option>
+                  <option value="fish">Fish Audio</option>
+                </select>
+              </label>
+              <div id="v-fish-fields" class="stack hidden">
+                <label>Clave API
+                  <input id="v-key" type="password" autocomplete="off" placeholder="key de fish.audio">
+                </label>
+                <label>Modelo
+                  <select id="v-model">
+                    <option value="s2.1-pro-free">s2.1-pro-free</option>
+                    <option value="s2.1-pro">s2.1-pro</option>
+                    <option value="s2-pro">s2-pro</option>
+                    <option value="s1">s1</option>
+                  </select>
+                </label>
+              </div>
+              <label>Identificador de voz
+                <input id="v-voice" placeholder="reference_id o nombre de voz del navegador">
+              </label>
+              <div class="list-pick">
+                <button type="button" id="v-list" class="icon-text-btn">
+                  <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/></svg>
+                  Ver voces disponibles
+                </button>
+                <select id="v-listed" class="hidden" aria-label="Voces disponibles"></select>
+              </div>
+            </section>
+            <section class="sample-box">
+              <div class="sample-head">
+                <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/></svg>
+                <div>
+                  <h3>Escuchá una muestra</h3>
+                  <p class="muted">Escribí un texto para probar cómo suena esta voz.</p>
+                </div>
+              </div>
+              <label>Texto de prueba
+                <textarea id="v-sample" rows="2"></textarea>
+              </label>
+              <button type="button" id="v-test" class="play-btn" disabled>
+                <span class="play-circle"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 5.5v13l11-6.5z"/></svg></span>
+                Probar voz
+              </button>
+            </section>
+            <p class="info-note">La voz lee las respuestas. Su configuración es independiente de la conexión del chat.</p>
+            <div class="editor-actions spread">
+              <button type="submit" class="primary">Guardar voz</button>
+              <button type="button" id="v-delete" class="danger-btn" disabled>Eliminar</button>
+            </div>
+            <p id="voice-status" class="status"></p>
+          </form>
+        </div>
       </div>
     </section>
   </main>
@@ -313,104 +468,7 @@
   </div>
 
 
-  <div id="provider-editor" class="modal hidden">
-    <div class="modal-backdrop" data-close="provider-editor"></div>
-    <div class="modal-card modal-wide">
-      <header class="modal-head">
-        <div>
-          <h2>Conexión</h2>
-          <p class="muted">OpenAI-compatible. xAI API no es el OAuth de suscripción.</p>
-        </div>
-        <button type="button" class="icon-btn" data-close="provider-editor" title="Cerrar" aria-label="Cerrar">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
-      </header>
-      <div class="panel" id="pane-provider">
-        <form id="provider-form" class="stack">
-          <label>Nombre
-            <input id="p-name" placeholder="Groq personal">
-          </label>
-          <label>Preset
-            <select id="p-preset">
-              <option value="">Elegir…</option>
-            </select>
-          </label>
-          <label>Base URL
-            <input id="p-url" placeholder="https://openrouter.ai/api/v1" required>
-          </label>
-          <label>API key
-            <input id="p-key" type="password" autocomplete="off" placeholder="sk-…">
-          </label>
-          <p id="or-note" class="note hidden">OpenRouter muestra la key una sola vez. Si la perdés, Create Key de nuevo. No pongas /keys en la Base URL.</p>
-          <div class="row">
-            <button type="submit" class="primary">Guardar</button>
-            <button type="button" id="test-connection" class="ghost" disabled>Probar conexión</button>
-            <button type="button" id="clear-key" class="ghost" disabled>Quitar key</button>
-            <button type="button" id="delete-provider" class="ghost" disabled>Borrar</button>
-          </div>
-          <p id="provider-status" class="status"></p>
-        </form>
-        <p class="note">Probar conexión lista modelos y no manda el prompt del personaje. No la pulses diez veces: en algunos free los fallos cuentan. Un 429 de noche suele ser el pool, no tu key.</p>
-        <h2>Modelos</h2>
-        <input id="model-filter" placeholder="Filtrar por id">
-        <div id="model-results" class="list models"></div>
-        <h2>Últimos intentos</h2>
-        <div id="usage-list" class="list"></div>
-      </div>
-    </div>
-  </div>
 
-  <div id="voice-editor" class="modal hidden">
-    <div class="modal-backdrop" data-close="voice-editor"></div>
-    <div class="modal-card">
-      <header class="modal-head">
-        <div>
-          <h2>Voz</h2>
-          <p class="muted">El audio no va al modelo.</p>
-        </div>
-        <button type="button" class="icon-btn" data-close="voice-editor" title="Cerrar" aria-label="Cerrar">
-          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M6 6l12 12M18 6 6 18"/></svg>
-        </button>
-      </header>
-      <div class="panel" id="pane-voice">
-        <form id="voice-form" class="stack">
-          <label>Nombre
-            <input id="v-name" placeholder="Fish personal">
-          </label>
-          <label>Motor
-            <select id="v-provider">
-              <option value="browser">Navegador</option>
-              <option value="fish">Fish Audio</option>
-            </select>
-          </label>
-          <div id="v-fish-fields" class="stack hidden">
-            <label>API key
-              <input id="v-key" type="password" autocomplete="off" placeholder="key de fish.audio">
-            </label>
-            <label>Modelo
-              <select id="v-model">
-                <option value="s2.1-pro-free">s2.1-pro-free</option>
-                <option value="s2.1-pro">s2.1-pro</option>
-                <option value="s2-pro">s2-pro</option>
-                <option value="s1">s1</option>
-              </select>
-            </label>
-          </div>
-          <label>Voz
-            <input id="v-voice" placeholder="reference_id o nombre de voz del navegador">
-          </label>
-          <select id="v-listed" class="hidden"></select>
-          <div class="row">
-            <button type="submit" class="primary">Guardar voz</button>
-            <button type="button" id="v-list" class="ghost">Listar voces</button>
-            <button type="button" id="v-test" class="ghost" disabled>Probar</button>
-            <button type="button" id="v-delete" class="ghost" disabled>Borrar</button>
-          </div>
-          <p id="voice-status" class="status"></p>
-        </form>
-      </div>
-    </div>
-  </div>
 
   <div id="toast" class="toast hidden" role="status"></div>
   <script type="importmap">

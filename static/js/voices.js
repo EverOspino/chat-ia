@@ -1,29 +1,19 @@
-function voiceStatus(voice) {
-  if (voice.provider === "browser") return { kind: "local", label: "Sistema" };
-  if (voice.has_key) return { kind: "ok", label: "Conectado" };
-  return { kind: "muted", label: "Sin key" };
-}
+const VOICE_ICONS = {
+  fish: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/></svg>',
+  browser: '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="11.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M9 20h6M12 16v4"/></svg>',
+};
 
 function renderVoices() {
   const list = $("voice-list");
   list.replaceChildren();
-  if (!state.voices.length) {
-    const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = "Todavía no hay voces.";
-    list.appendChild(p);
-  }
+  if (!state.voices.length) emptyNote(list, "Todavía no hay voces.");
   for (const voice of state.voices) {
-    list.appendChild(entityCard({
-      active: state.editingVoiceId === voice.id && !$("voice-editor").classList.contains("hidden"),
+    list.appendChild(listRow({
+      active: state.editingVoiceId === voice.id,
+      data: { voice: voice.id },
+      icon: VOICE_ICONS[voice.provider] || VOICE_ICONS.fish,
       name: voice.name,
-      sub: voice.provider === "fish" ? "Fish Audio" : "Navegador",
-      status: voiceStatus(voice),
-      actions: [
-        actionBtn("Probar", { "data-voice-test": voice.id }),
-        actionBtn("Editar", { "data-voice": voice.id }),
-        ...(voice.provider === "browser" ? [] : [actionBtn("Borrar", { "data-voice-delete": voice.id })]),
-      ],
+      sub: voice.provider === "fish" ? (voice.has_key ? "Fish Audio" : "Fish Audio · sin key") : "Voz del sistema",
     }));
   }
   fillSelect(
@@ -38,7 +28,44 @@ function renderVoices() {
 }
 
 function syncVoiceFields() {
-  $("v-fish-fields").classList.toggle("hidden", $("v-provider").value !== "fish");
+  const fish = $("v-provider").value === "fish";
+  $("v-fish-fields").classList.toggle("hidden", !fish);
+  $("voice-badge").textContent = fish ? "Síntesis de voz" : "Voz del sistema";
+  $("voice-badge").classList.remove("hidden");
+}
+
+function voiceHead() {
+  const name = $("v-name").value.trim();
+  $("voice-title").textContent = name || (state.editingVoiceId ? "Sin nombre" : "Nueva voz");
+  if (!$("v-sample").dataset.touched) {
+    const who = (state.thread && state.thread.character_name) || (state.characters[0] && state.characters[0].name);
+    $("v-sample").value = who ? "Hola, soy " + who + ". Me alegra verte por acá." : "Hola. Esta es una prueba de voz.";
+  }
+}
+
+function selectVoice(id) {
+  const found = state.voices.find((item) => item.id === id);
+  if (found) fillVoiceForm(found);
+}
+
+function newVoice() {
+  state.editingVoiceId = null;
+  $("voice-form").reset();
+  $("v-key").placeholder = "key de fish.audio";
+  $("v-test").disabled = true;
+  $("v-delete").disabled = true;
+  $("v-listed").classList.add("hidden");
+  delete $("v-sample").dataset.touched;
+  syncVoiceFields();
+  voiceHead();
+  renderVoices();
+  setStatus("voice-status", "");
+}
+
+function ensureVoiceEditor() {
+  if (state.editingVoiceId && state.voices.some((v) => v.id === state.editingVoiceId)) return;
+  if (state.voices.length) selectVoice(state.voices[0].id);
+  else newVoice();
 }
 
 async function saveVoice(event) {
@@ -107,7 +134,7 @@ async function testVoice() {
   const found = state.voices.find((item) => item.id === state.editingVoiceId);
   if (!found) return;
   Voice.setAccount(found);
-  Voice.preview("Hola. Esta es una prueba de voz.");
+  Voice.preview($("v-sample").value.trim() || "Hola. Esta es una prueba de voz.");
   setStatus("voice-status", found.provider === "fish" ? "Pidiendo audio a Fish…" : "Leyendo con el navegador.", "ok");
 }
 
@@ -117,12 +144,8 @@ async function deleteVoice() {
   try {
     await api("/api/voices/" + state.editingVoiceId, { method: "DELETE" });
     state.editingVoiceId = null;
-    $("voice-form").reset();
-    $("v-test").disabled = true;
-    $("v-delete").disabled = true;
-    syncVoiceFields();
     await refreshCore();
-    closeModal("voice-editor");
+    ensureVoiceEditor();
     setStatus("voice-status", "Voz borrada.", "ok");
   } catch (err) {
     setStatus("voice-status", err.message, "bad");

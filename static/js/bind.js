@@ -74,55 +74,14 @@ function bind() {
       selectCharacter(character.dataset.character);
       return;
     }
-    const voiceDelete = event.target.closest("[data-voice-delete]");
-    if (voiceDelete) {
-      const found = state.voices.find((item) => item.id === voiceDelete.dataset.voiceDelete);
-      if (!found) return;
-      fillVoiceForm(found);
-      $("v-delete").click();
-      return;
-    }
-    const voiceTest = event.target.closest("[data-voice-test]");
-    if (voiceTest) {
-      const found = state.voices.find((item) => item.id === voiceTest.dataset.voiceTest);
-      if (!found) return;
-      fillVoiceForm(found);
-      testVoice();
-      return;
-    }
     const voiceItem = event.target.closest("[data-voice]");
     if (voiceItem) {
-      const found = state.voices.find((item) => item.id === voiceItem.dataset.voice);
-      if (!found) return;
-      fillVoiceForm(found);
-      navigate("voice");
-      openModal("voice-editor");
-      return;
-    }
-    const providerDelete = event.target.closest("[data-provider-delete]");
-    if (providerDelete) {
-      const found = state.providers.find((item) => item.id === providerDelete.dataset.providerDelete);
-      if (!found) return;
-      fillProviderForm(found);
-      $("delete-provider").click();
-      return;
-    }
-    const providerTest = event.target.closest("[data-provider-test]");
-    if (providerTest) {
-      const found = state.providers.find((item) => item.id === providerTest.dataset.providerTest);
-      if (!found) return;
-      fillProviderForm(found);
-      openModal("provider-editor");
-      $("test-connection").click();
+      selectVoice(voiceItem.dataset.voice);
       return;
     }
     const provider = event.target.closest("[data-provider]");
     if (provider) {
-      const found = state.providers.find((item) => item.id === provider.dataset.provider);
-      if (!found) return;
-      fillProviderForm(found);
-      navigate("connect");
-      openModal("provider-editor");
+      selectProvider(provider.dataset.provider);
       return;
     }
     const model = event.target.closest("[data-model]");
@@ -255,6 +214,7 @@ function bind() {
       $("clear-key").disabled = false;
       $("delete-provider").disabled = false;
       await refreshCore();
+      providerHead(saved);
       setStatus("provider-status", "Guardado. La key no se vuelve a mostrar entera.", "ok");
     } catch (err) {
       setStatus("provider-status", err.message, "bad");
@@ -262,17 +222,19 @@ function bind() {
   });
 
   $("new-provider-btn").addEventListener("click", () => {
-    state.editingProviderId = null;
-    state.clearKey = false;
-    $("provider-form").reset();
-    $("p-key").placeholder = "sk-…";
-    $("test-connection").disabled = true;
-    $("clear-key").disabled = true;
-    $("delete-provider").disabled = true;
-    updateOrNote();
-    renderProviders();
-    setStatus("provider-status", "");
-    openModal("provider-editor");
+    newProvider();
+    $("p-name").focus();
+  });
+
+  $("p-name").addEventListener("input", () => {
+    providerHead(state.providers.find((item) => item.id === state.editingProviderId) || null);
+  });
+
+  $("p-key-eye").addEventListener("click", () => {
+    const show = $("p-key").type === "password";
+    $("p-key").type = show ? "text" : "password";
+    $("p-key-eye").setAttribute("aria-pressed", show ? "true" : "false");
+    $("p-key-eye").title = show ? "Ocultar clave" : "Mostrar clave";
   });
 
   $("p-preset").addEventListener("change", () => {
@@ -297,12 +259,8 @@ function bind() {
     if (!confirm("¿Borrar esta conexión? Los hilos quedan, pero no van a poder enviar.")) return;
     await api("/api/providers/" + state.editingProviderId, { method: "DELETE" });
     state.editingProviderId = null;
-    $("provider-form").reset();
-    $("test-connection").disabled = true;
-    $("delete-provider").disabled = true;
-    $("clear-key").disabled = true;
     await refreshCore();
-    closeModal("provider-editor");
+    ensureProviderEditor();
     setStatus("provider-status", "Conexión borrada.", "ok");
   });
 
@@ -379,16 +337,12 @@ function bind() {
   $("v-test").addEventListener("click", testVoice);
   $("v-delete").addEventListener("click", deleteVoice);
   $("new-voice-btn").addEventListener("click", () => {
-    state.editingVoiceId = null;
-    $("voice-form").reset();
-    $("v-key").placeholder = "key de fish.audio";
-    $("v-test").disabled = true;
-    $("v-delete").disabled = true;
-    $("v-listed").classList.add("hidden");
-    syncVoiceFields();
-    renderVoices();
-    setStatus("voice-status", "");
-    openModal("voice-editor");
+    newVoice();
+    $("v-name").focus();
+  });
+  $("v-name").addEventListener("input", voiceHead);
+  $("v-sample").addEventListener("input", () => {
+    $("v-sample").dataset.touched = "1";
   });
   Voice.setError((message) => toast(message));
   syncVoiceFields();
@@ -413,7 +367,7 @@ function bind() {
   $("settings-save").addEventListener("click", () => saveSettings());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
-      const ids = ["settings-modal", "new-thread-modal", "provider-editor", "voice-editor"];
+      const ids = ["settings-modal", "new-thread-modal"];
       const open = ids.some((id) => !$(id).classList.contains("hidden"));
       if (!$("settings-modal").classList.contains("hidden")) restoreSettings();
       for (const id of ids) closeModal(id);

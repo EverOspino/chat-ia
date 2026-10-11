@@ -203,48 +203,6 @@ function bubble(msg, index) {
   return wrap;
 }
 
-function actionBtn(label, attrs) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "ghost";
-  btn.textContent = label;
-  for (const [key, value] of Object.entries(attrs || {})) btn.setAttribute(key, value);
-  return btn;
-}
-
-function entityCard(opts) {
-  const card = document.createElement("article");
-  card.className = "entity-card" + (opts.active ? " active" : "");
-  const top = document.createElement("div");
-  top.className = "entity-top";
-  const dot = document.createElement("div");
-  dot.className = "avatar-dot";
-  dot.textContent = initial(opts.name);
-  const copy = document.createElement("div");
-  copy.className = "entity-copy";
-  const title = document.createElement("strong");
-  title.textContent = opts.name;
-  copy.appendChild(title);
-  if (opts.sub) {
-    const sub = document.createElement("small");
-    sub.textContent = opts.sub;
-    copy.appendChild(sub);
-  }
-  top.append(dot, copy);
-  card.appendChild(top);
-  if (opts.status) {
-    const meta = document.createElement("div");
-    meta.className = "entity-meta";
-    meta.appendChild(statusChip(opts.status.kind, opts.status.label));
-    card.appendChild(meta);
-  }
-  const actions = document.createElement("div");
-  actions.className = "entity-actions";
-  for (const action of opts.actions || []) actions.appendChild(action);
-  card.appendChild(actions);
-  return card;
-}
-
 function renderCharacters() {
   const list = $("character-list");
   list.replaceChildren();
@@ -285,30 +243,52 @@ function renderCharacters() {
 function providerStatus(provider) {
   const url = (provider.base_url || "").toLowerCase();
   if (/localhost|127\.0\.0\.1/.test(url)) return { kind: "local", label: "Local" };
-  if (provider.has_key) return { kind: "ok", label: "Conectado" };
+  if (provider.has_key) return { kind: "ok", label: "Conectada" };
   return { kind: "muted", label: "Sin key" };
+}
+
+// Fila de lista para Conexiones y Voces: marca a la izquierda, nombre y detalle, flecha.
+function listRow(opts) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "entity-row" + (opts.active ? " active" : "");
+  for (const [key, value] of Object.entries(opts.data || {})) row.dataset[key] = value;
+  const mark = document.createElement("span");
+  mark.className = opts.dot ? "status-dot " + opts.dot : "row-icon";
+  if (opts.icon) mark.innerHTML = opts.icon;
+  const copy = document.createElement("span");
+  copy.className = "entity-copy";
+  const title = document.createElement("strong");
+  title.textContent = opts.name;
+  const sub = document.createElement("small");
+  sub.textContent = opts.sub || "";
+  copy.append(title, sub);
+  const chevron = document.createElement("span");
+  chevron.className = "row-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  row.append(mark, copy, chevron);
+  return row;
+}
+
+function emptyNote(list, text) {
+  const p = document.createElement("p");
+  p.className = "muted list-note";
+  p.textContent = text;
+  list.appendChild(p);
 }
 
 function renderProviders() {
   const list = $("provider-list");
   list.replaceChildren();
-  if (!state.providers.length) {
-    const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = "Todavía no hay conexiones.";
-    list.appendChild(p);
-  }
+  if (!state.providers.length) emptyNote(list, "Todavía no hay conexiones.");
   for (const provider of state.providers) {
-    list.appendChild(entityCard({
-      active: state.editingProviderId === provider.id && !$("provider-editor").classList.contains("hidden"),
+    const status = providerStatus(provider);
+    list.appendChild(listRow({
+      active: state.editingProviderId === provider.id,
+      data: { provider: provider.id },
+      dot: status.kind,
       name: provider.name,
-      sub: provider.base_url,
-      status: providerStatus(provider),
-      actions: [
-        actionBtn("Probar", { "data-provider-test": provider.id }),
-        actionBtn("Editar", { "data-provider": provider.id }),
-        actionBtn("Borrar", { "data-provider-delete": provider.id }),
-      ],
+      sub: status.label,
     }));
   }
   const providerOptions = state.providers.map((p) => ({ id: p.id, label: p.name }));
@@ -369,21 +349,34 @@ function renderModels() {
   const filter = ($("model-filter").value || "").toLowerCase();
   const list = $("model-results");
   list.replaceChildren();
-  const catalog = state.modelCache[state.editingProviderId] || state.models;
+  const catalog = state.modelCache[state.editingProviderId] || [];
   const shown = catalog
     .filter((m) => !filter || m.id.toLowerCase().includes(filter) || (m.name || "").toLowerCase().includes(filter))
-    .sort((a, b) => a.id.localeCompare(b.id, "es"));
+    .sort((a, b) => Number(Boolean(b.free)) - Number(Boolean(a.free)) || a.id.localeCompare(b.id, "es"));
+  if (!catalog.length) {
+    emptyNote(list, state.editingProviderId ? "Probá la conexión para ver sus modelos." : "Guardá la conexión para ver sus modelos.");
+  } else if (!shown.length) {
+    emptyNote(list, "Ningún modelo coincide.");
+  }
   for (const model of shown.slice(0, 80)) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "model-item";
     btn.dataset.model = model.id;
     btn.dataset.context = model.context || "";
-    btn.textContent = model.id;
+    btn.title = model.id;
+    const copy = document.createElement("span");
+    copy.className = "model-copy";
+    const name = document.createElement("strong");
+    name.textContent = model.name || model.id;
+    const id = document.createElement("small");
+    id.textContent = model.id;
+    copy.append(name, id);
+    btn.appendChild(copy);
     if (model.free) {
       const mark = document.createElement("span");
-      mark.className = "free";
-      mark.textContent = " free";
+      mark.className = "free-badge";
+      mark.textContent = "Free";
       btn.appendChild(mark);
     }
     list.appendChild(btn);
@@ -397,18 +390,42 @@ function renderUsage() {
   const list = $("usage-list");
   list.replaceChildren();
   if (!state.usage.length) {
-    const p = document.createElement("p");
-    p.className = "muted";
-    p.textContent = "Todavía no hay intentos.";
-    list.appendChild(p);
+    emptyNote(list, "Todavía no hay intentos.");
     return;
   }
+  const cell = (text, cls) => {
+    const span = document.createElement("span");
+    if (cls) span.className = cls;
+    span.textContent = text;
+    return span;
+  };
+  const head = document.createElement("div");
+  head.className = "usage-row usage-head";
+  head.append(cell("Hora"), cell("Modelo"), cell("Estado"));
+  list.appendChild(head);
   for (const event of state.usage) {
     const row = document.createElement("div");
-    row.className = "item";
-    const when = (event.created_at || "").slice(11, 16);
-    const klass = event.error_class || "ok";
-    row.textContent = [when, event.model || "—", event.http_status || "—", klass].join(" · ");
+    row.className = "usage-row";
+    const ok = !event.error_class && Number(event.http_status) === 200;
+    const model = event.model ? event.model.split("/").pop().replace(/:free$/, "") : "Prueba";
+    const label = ok ? "Correcto" : USAGE_LABELS[event.error_class] || event.error_class || "Error";
+    const status = cell("", "usage-status");
+    const dot = cell("", "status-dot " + (ok ? "ok" : "bad"));
+    status.append(dot, document.createTextNode((event.http_status || "—") + " · " + label));
+    const modelCell = cell(model, "usage-model");
+    modelCell.title = event.model || "";
+    row.append(cell(timeLabel(event.created_at)), modelCell, status);
     list.appendChild(row);
   }
 }
+
+const USAGE_LABELS = {
+  "401": "Key inválida",
+  "402": "Sin créditos",
+  "429": "Límite",
+  "429_global": "Límite del proveedor",
+  "429_personal": "Límite personal",
+  "502": "Sin respuesta",
+  parse_empty: "Respuesta vacía",
+  unknown: "Error",
+};

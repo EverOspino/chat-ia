@@ -109,13 +109,6 @@ function closeModal(id) {
   $(id).classList.add("hidden");
 }
 
-function statusChip(kind, label) {
-  const chip = document.createElement("span");
-  chip.className = "badge-status " + kind;
-  chip.textContent = label;
-  return chip;
-}
-
 function setStatus(id, text, kind) {
   const node = $(id);
   node.textContent = text || "";

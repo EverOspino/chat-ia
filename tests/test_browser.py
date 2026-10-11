@@ -238,6 +238,29 @@ class BrowserMicTests(unittest.TestCase):
         self.page.wait_for_selector("#character-list .entity-row.active:has-text('Zoe')")
         self.assertIn("Versión 1", self.page.locator("#character-badge").inner_text())
 
+    def test_connection_page_selects_and_saves(self):
+        self.page.goto(self.base + "/conexiones", wait_until="networkidle")
+        self.page.wait_for_function("() => document.getElementById('provider-title').textContent === 'Local'")
+        self.assertEqual(self.page.locator("#provider-badge").inner_text(), "Local")
+        self.page.locator("#new-provider-btn").click()
+        self.assertEqual(self.page.locator("#provider-title").inner_text(), "Nueva conexión")
+        self.page.locator("#p-preset").select_option("lmstudio")
+        self.assertIn("1234", self.page.locator("#p-url").input_value())
+        self.page.locator('#provider-form button[type="submit"]').click()
+        self.page.wait_for_selector("#provider-list .entity-row.active:has-text('LM Studio')")
+        self.assertEqual(self.page.locator("#provider-list .entity-row").count(), 2)
+
+    def test_voice_page_selects_and_saves(self):
+        self.page.goto(self.base + "/voces", wait_until="networkidle")
+        self.page.wait_for_selector("#voice-list .entity-row.active")
+        self.page.locator("#new-voice-btn").click()
+        self.assertEqual(self.page.locator("#voice-title").inner_text(), "Nueva voz")
+        self.page.locator("#v-name").fill("Sistema lenta")
+        self.assertEqual(self.page.locator("#voice-title").inner_text(), "Sistema lenta")
+        self.page.locator('#voice-form button[type="submit"]').click()
+        self.page.wait_for_selector("#voice-list .entity-row.active:has-text('Sistema lenta')")
+        self.assertFalse(self.page.locator("#v-test").is_disabled())
+
     def test_mobile_menu_opens_and_closes(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.locator("#menu-btn").click()
