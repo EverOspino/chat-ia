@@ -14,7 +14,7 @@ sys.path.insert(0, str(ROOT))
 from app.adapter import build_payload, stream_chat, test_connection, whisper_models
 from app.adapter import Delta, StreamDone, StreamFail
 from app.errors import AppError, extract_text, normalize_error
-from app.personality import approx_tokens, assemble_messages, calibrate_ratio, compile_prompt, minor_age_error, parse_replies, suggestion_messages, trim_messages
+from app.personality import approx_tokens, assemble_messages, calibrate_ratio, compile_prompt, fresh_replies, minor_age_error, parse_replies, suggestion_messages, trim_messages
 from app.avatars import allowed, default_model, list_models as list_avatar_files
 from app.animations import allowed as anim_allowed, list_clips
 from app.voice import FISH_BAD_KEY, consume_sentences, fish_error, speakable
@@ -196,10 +196,20 @@ class PersonalityTests(unittest.TestCase):
         self.assertIn("empujar", msgs[0]["content"])
         self.assertIn("desviar", msgs[0]["content"])
         self.assertIn("hola", msgs[1]["content"])
-        self.assertIn("No escribas así", msgs[1]["content"])
+        self.assertIn("El usuario le responde a esto", msgs[1]["content"])
+        self.assertIn("Prohibido repetirlos", msgs[1]["content"])
+        self.assertNotIn("Imitá esto", msgs[1]["content"])
         self.assertNotIn(long, msgs[1]["content"])
         self.assertEqual([m["role"] for m in msgs], ["system", "user"])
         self.assertNotIn("helpful assistant", msgs[0]["content"].lower())
+
+    def test_fresh_replies_drop_sent_messages(self):
+        history = [
+            {"role": "user", "content": "Me lo llevo. ¿Y vos creés en esas historias del mar?"},
+            {"role": "assistant", "content": "Creo en la marea."},
+        ]
+        replies = ["me lo llevo ¿y vos creés en esas historias del mar", "¿Y la marea qué deja?", "Creo en la marea."]
+        self.assertEqual(fresh_replies(replies, history), ["¿Y la marea qué deja?", "Creo en la marea."])
 
 
 class ErrorTests(unittest.TestCase):
@@ -660,6 +670,36 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(reloaded.json()["messages"], [])
         missing = self.client.post("/api/threads/no-existe/suggestions")
         self.assertEqual(missing.status_code, 404)
+
+    def test_suggestions_retry_when_echoing_user(self):
+        created = self.client.post("/api/characters", json={"fields": {"nombre": "Vera", "edad": "34"}})
+        provider = self.client.post(
+            "/api/providers",
+            json={"name": "Local", "base_url": "http://127.0.0.1:11434/v1", "api_key": ""},
+        )
+        thread = self.client.post(
+            "/api/threads",
+            json={"character_id": created.json()["id"], "provider_account_id": provider.json()["id"], "model": "llama"},
+        )
+        thread_id = thread.json()["id"]
+        from app import db
+
+        db.add_message(thread_id, "user", "Hola, busco un libro.")
+        db.add_message(thread_id, "assistant", "*señala un estante*")
+        calls = []
+
+        async def fake_complete(*args, **kwargs):
+            calls.append(args[5])
+            if len(calls) == 1:
+                return '{"replies":["Hola, busco un libro.","¿Ese?","Gracias"]}', None, 10, 20
+            return '{"replies":["¿Ese de arriba?","¿Lo puedo hojear?","Mejor vuelvo mañana"]}', None, 10, 20
+
+        with patch("app.main.complete_chat", fake_complete):
+            res = self.client.post("/api/threads/" + thread_id + "/suggestions")
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(calls), 2)
+        self.assertGreater(calls[1], calls[0])
+        self.assertNotIn("Hola, busco un libro.", res.json()["replies"])
 
     def test_transcribe_does_not_persist(self):
         created = self.client.post("/api/characters", json={"fields": {"nombre": "Vera", "edad": "34"}})

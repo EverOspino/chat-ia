@@ -175,7 +175,7 @@ SUGGEST_KEYS = ("continuar", "empujar", "desviar")
 SUGGEST_SYSTEM = (
     "Tu salida es texto que el usuario humano pegaría en el chat. "
     "No sos el personaje. No narrás al personaje. No continuás su turno. "
-    "Copiá la voz y la longitud de los ejemplos del usuario. "
+    "Copiá la voz y la longitud de los ejemplos del usuario, pero nunca repitas un mensaje que ya mandó. "
     "Si el usuario manda una línea corta, cada opción es una línea corta. "
     "Prohibido prosa larga, descripción de cuerpos, ambiente o pensamientos del personaje. "
     "Tres movimientos del usuario, distintos: "
@@ -217,15 +217,28 @@ def suggestion_messages(history: list[dict], character_name: str = "") -> list[d
         elif role == "assistant":
             last_char = content.strip()
     style = "\n".join(f"- {item}" for item in users[-6:]) or "- (todavía no escribió)"
-    beat = _clip(last_char) if last_char else "(nada todavía)"
+    beat = _clip(last_char, 500) if last_char else "(nada todavía)"
     user = (
-        "Voz del usuario. Imitá esto, esta longitud:\n"
-        f"{style}\n\n"
-        f"Último turno de {name}, solo contexto. No escribas así:\n"
+        f"Último turno de {name}. El usuario le responde a esto:\n"
         f"{beat}\n\n"
-        f"Tres mensajes nuevos del usuario. Si suena a {name}, está mal."
+        "Mensajes que el usuario ya mandó. Solo sirven para copiar su tono y su largo. "
+        "Prohibido repetirlos o parafrasearlos:\n"
+        f"{style}\n\n"
+        f"Escribí tres respuestas nuevas del usuario a ese último turno de {name}. "
+        f"Cada una reacciona a algo concreto que {name} dijo o hizo. "
+        f"Si suena a {name} o repite un mensaje de arriba, está mal."
     )
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+
+def _norm(text: str) -> str:
+    return re.sub(r"[^\w]+", " ", (text or "").lower()).strip()
+
+
+def fresh_replies(replies: list[str], history: list[dict]) -> list[str]:
+    """Descarta sugerencias que repiten un mensaje que el usuario ya mandó."""
+    sent = {_norm(m.get("content") or "") for m in history if m.get("role") == "user"}
+    return [r for r in replies if _norm(r) not in sent]
 
 
 def _clean_reply(value) -> str:

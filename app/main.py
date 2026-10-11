@@ -18,6 +18,7 @@ from app.personality import (
     calibrate_ratio,
     compile_prompt,
     default_fields,
+    fresh_replies,
     minor_age_error,
     parse_replies,
     suggestion_messages,
@@ -517,28 +518,30 @@ async def post_suggestions(thread_id: str):
     history = db.list_messages(thread_id)
     assembled = suggestion_messages(history, character.get("name") or "")
     trimmed = trim_messages(assembled, clamp_context(thread.get("context_tokens")), 900, db.token_ratio(thread, model))
-    text, err, tin, tout = await complete_chat(
-        provider["base_url"],
-        provider["api_key"],
-        model,
-        trimmed,
-        900,
-        0.9,
-    )
-    db.add_usage(
-        thread_id,
-        model,
-        tin,
-        tout,
-        200 if err is None else err.http_status,
-        None if err is None else err.error_class,
-    )
-    if err:
-        raise HTTPException(err.http_status or 400, err.message)
-    replies = parse_replies(text)
-    if len(replies) < 3:
-        raise HTTPException(400, "No se pudieron armar 3 opciones. Probá de nuevo.")
-    return {"replies": replies[:3]}
+    # Un segundo intento, más suelto, si el modelo devolvió mensajes que el usuario ya mandó.
+    for temperature in (0.9, 1.1):
+        text, err, tin, tout = await complete_chat(
+            provider["base_url"],
+            provider["api_key"],
+            model,
+            trimmed,
+            900,
+            temperature,
+        )
+        db.add_usage(
+            thread_id,
+            model,
+            tin,
+            tout,
+            200 if err is None else err.http_status,
+            None if err is None else err.error_class,
+        )
+        if err:
+            raise HTTPException(err.http_status or 400, err.message)
+        replies = fresh_replies(parse_replies(text), history)
+        if len(replies) >= 3:
+            return {"replies": replies[:3]}
+    raise HTTPException(400, "No se pudieron armar 3 opciones nuevas. Probá de nuevo o cambiá de modelo.")
 
 
 @app.post("/api/threads/{thread_id}/transcribe")
