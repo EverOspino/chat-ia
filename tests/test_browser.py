@@ -297,6 +297,18 @@ class BrowserMicTests(unittest.TestCase):
         self.assertEqual(self.page.locator("#character-title").inner_text(), before)
         self.assertEqual(self.page.locator("#f-tono").input_value(), "cambio sin guardar")
 
+    def test_mobile_menu_holds_avatar_and_volume(self):
+        self.page.set_viewport_size({"width": 375, "height": 812})
+        self.page.wait_for_function("() => document.querySelector('.stage-foot').parentElement.id === 'rail-stage'")
+        self.page.locator("#menu-btn").click()
+        self.page.wait_for_function("() => document.body.classList.contains('menu-open')")
+        self.assertTrue(self.page.locator("#avatar-pick").is_visible())
+        self.page.locator("#voice-volume").fill("40")
+        self.assertEqual(self.page.locator("#volume-value").inner_text(), "40%")
+        self.page.set_viewport_size({"width": 1280, "height": 800})
+        self.page.wait_for_function("() => document.querySelector('.stage-foot').parentElement.classList.contains('stage')")
+        self.assertTrue(self.page.locator("#voice-volume").is_visible())
+
     def test_mobile_menu_opens_and_closes(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.locator("#menu-btn").click()

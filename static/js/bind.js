@@ -3,7 +3,19 @@ function setMenu(open) {
   $("menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+const narrowScreen = window.matchMedia("(max-width: 860px)");
+
+// En celular el panel del personaje es el fondo: su avatar y volumen pasan al menú lateral.
+// Se mueve el mismo nodo, así conserva ids y eventos (avatar.js incluido).
+function placeStageControls() {
+  const foot = document.querySelector(".stage-foot");
+  const target = narrowScreen.matches ? $("rail-stage") : document.querySelector(".stage");
+  if (foot && target && foot.parentElement !== target) target.appendChild(foot);
+}
+
 function bind() {
+  placeStageControls();
+  narrowScreen.addEventListener("change", placeStageControls);
   $("menu-btn").addEventListener("click", () => setMenu(!document.body.classList.contains("menu-open")));
   $("menu-backdrop").addEventListener("click", () => setMenu(false));
   document.addEventListener("keydown", (event) => {

@@ -1814,7 +1814,7 @@ pre {
 .popover .danger-item { color: var(--danger); }
 .popover .danger-item:hover:not(:disabled) { background: rgba(240, 137, 122, 0.12); }
 
-.menu-btn, .menu-backdrop { display: none; }
+.menu-btn, .menu-backdrop, .rail-stage { display: none; }
 
 /* Celular: el personaje ocupa la pantalla y el chat flota encima, como en Grok. */
 @media (max-width: 860px) {
@@ -1898,7 +1898,7 @@ pre {
     box-shadow: none;
   }
 
-  .stage-head, .stage-foot, .stage-resize { display: none; }
+  .stage-head, .stage-resize { display: none; }
 
   #avatar-canvas {
     background:
@@ -1994,4 +1994,29 @@ pre {
   }
 
   .suggest-menu { left: 0.7rem; right: 0.7rem; }
+
+  .rail-stage {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--line);
+  }
+
+  .rail-stage-title {
+    margin: 0 0.4rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--muted);
+  }
+
+  .rail-stage .stage-foot {
+    padding: 0;
+    gap: 0.6rem;
+    border: 0;
+    background: none;
+  }
+
+  .rail-stage .volume-row { padding: 0 0.3rem; }
 }
