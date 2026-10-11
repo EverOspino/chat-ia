@@ -463,6 +463,35 @@ class ApiTests(unittest.TestCase):
         missing = self.client.get("/no-existe")
         self.assertEqual(missing.status_code, 404)
 
+    def test_character_foto_is_validated_and_kept_out_of_prompt(self):
+        foto = "data:image/jpeg;base64," + "A" * 400
+        ok = self.client.post("/api/characters", json={"fields": {"nombre": "Vera", "edad": "34", "foto": foto}})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()["fields"]["foto"], foto)
+        self.assertNotIn("base64", ok.json()["prompt_compiled"])
+        bad = self.client.post("/api/characters", json={"fields": {"nombre": "Vera", "foto": "javascript:alert(1)"}})
+        self.assertEqual(bad.status_code, 400)
+        huge = self.client.post(
+            "/api/characters",
+            json={"fields": {"nombre": "Vera", "foto": "data:image/png;base64," + "A" * 300_000}},
+        )
+        self.assertEqual(huge.status_code, 400)
+
+    def test_thread_can_be_renamed(self):
+        char = self.client.post("/api/characters", json={"fields": {"nombre": "Vera", "edad": "34"}}).json()
+        prov = self.client.post(
+            "/api/providers", json={"name": "Local", "base_url": "http://127.0.0.1:11434/v1", "api_key": ""}
+        ).json()
+        thread = self.client.post(
+            "/api/threads", json={"character_id": char["id"], "provider_account_id": prov["id"], "model": "llama"}
+        ).json()
+        renamed = self.client.patch("/api/threads/" + thread["id"], json={"title": "  La  biblioteca  "})
+        self.assertEqual(renamed.status_code, 200)
+        self.assertEqual(renamed.json()["title"], "La biblioteca")
+        self.assertEqual(renamed.json()["model"], "llama")
+        empty = self.client.patch("/api/threads/" + thread["id"], json={"title": "   "})
+        self.assertEqual(empty.status_code, 400)
+
     def test_mvp_paths(self):
         compiled = self.client.post("/api/compile", json={"fields": {"nombre": "Vera", "edad": "34", "tono": "seca"}})
         self.assertEqual(compiled.status_code, 200)

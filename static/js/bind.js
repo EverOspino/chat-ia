@@ -10,6 +10,21 @@ function bind() {
     if (event.key === "Escape" && document.body.classList.contains("menu-open")) setMenu(false);
   });
   document.body.addEventListener("click", async (event) => {
+    const threadMenuBtn = event.target.closest("[data-thread-menu]");
+    if (threadMenuBtn) {
+      toggleThreadMenu(threadMenuBtn);
+      return;
+    }
+    const threadAction = event.target.closest("[data-thread-action]");
+    if (threadAction) {
+      const id = $("thread-menu").dataset.thread;
+      hideThreadMenu();
+      if (!id) return;
+      const run = threadAction.dataset.threadAction === "rename" ? renameThread : removeThread;
+      run(id).catch((err) => toast(err.message));
+      return;
+    }
+    if (!event.target.closest("#thread-menu")) hideThreadMenu();
     // En celular el menú es un panel lateral: se cierra al elegir algo.
     if (event.target.closest("[data-tab], [data-thread], #new-thread-btn")) setMenu(false);
     const suggestPick = event.target.closest("[data-suggest]");
@@ -132,21 +147,41 @@ function bind() {
     if (state.abort) state.abort.abort();
   });
 
-  $("delete-thread").addEventListener("click", async () => {
+  $("delete-thread").addEventListener("click", () => {
     if (!state.thread) return;
-    if (!confirm("¿Borrar este hilo?")) return;
-    await api("/api/threads/" + state.thread.id, { method: "DELETE" });
-    state.thread = null;
-    state.messages = [];
-    await refreshCore();
-    showThread(null, []);
-    navigate("chat", "", true);
+    removeThread(state.thread.id).catch((err) => toast(err.message));
   });
 
   $("character-form").addEventListener("input", (event) => {
+    if (event.target.id === "photo-file") return;
+    state.dirty.character = true;
     growFormAreas();
     scheduleCompile();
     if (event.target.id === "f-nombre") characterHead();
+  });
+  $("photo-file").addEventListener("change", async () => {
+    const file = $("photo-file").files[0];
+    $("photo-file").value = "";
+    if (!file) return;
+    try {
+      setCharacterPhoto(await photoFromFile(file));
+    } catch (err) {
+      setStatus("character-status", err.message || "No se pudo leer la imagen.", "bad");
+    }
+  });
+  $("photo-clear").addEventListener("click", () => setCharacterPhoto(""));
+  $("thread-list").addEventListener("scroll", hideThreadMenu);
+  window.addEventListener("resize", hideThreadMenu);
+  $("provider-form").addEventListener("input", () => {
+    state.dirty.provider = true;
+  });
+  $("voice-form").addEventListener("input", (event) => {
+    if (event.target.id !== "v-sample") state.dirty.voice = true;
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (!Object.values(state.dirty).some(Boolean)) return;
+    event.preventDefault();
+    event.returnValue = "";
   });
   $("character-form").addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -159,6 +194,10 @@ function bind() {
       await refreshCore();
       fillCharacterForm(saved.fields, saved.version);
       $("prompt-preview").textContent = saved.prompt_compiled;
+      if (state.thread && state.thread.character_id === saved.id) {
+        paintAvatar($("chat-avatar"), saved.name, characterFoto(saved));
+        renderMessages();
+      }
       setStatus("character-status", "Guardado. El próximo turno usa esta versión.", "ok");
     } catch (err) {
       setStatus("character-status", err.message, "bad");
@@ -167,7 +206,7 @@ function bind() {
 
   $("new-character-btn").addEventListener("click", async () => {
     try {
-      await newCharacter();
+      if (!(await newCharacter())) return;
       $("f-nombre").focus();
     } catch (err) {
       toast(err.message);
@@ -180,6 +219,7 @@ function bind() {
     try {
       await api("/api/characters/" + state.editingCharacterId, { method: "DELETE" });
       state.editingCharacterId = null;
+      state.dirty.character = false;
       await refreshCore();
       ensureCharacterEditor();
       setStatus("character-status", "Borrado.", "ok");
@@ -215,6 +255,7 @@ function bind() {
       $("delete-provider").disabled = false;
       await refreshCore();
       providerHead(saved);
+      state.dirty.provider = false;
       setStatus("provider-status", "Guardado. La key no se vuelve a mostrar entera.", "ok");
     } catch (err) {
       setStatus("provider-status", err.message, "bad");
@@ -222,7 +263,7 @@ function bind() {
   });
 
   $("new-provider-btn").addEventListener("click", () => {
-    newProvider();
+    if (!newProvider()) return;
     $("p-name").focus();
   });
 
@@ -259,6 +300,7 @@ function bind() {
     if (!confirm("¿Borrar esta conexión? Los hilos quedan, pero no van a poder enviar.")) return;
     await api("/api/providers/" + state.editingProviderId, { method: "DELETE" });
     state.editingProviderId = null;
+    state.dirty.provider = false;
     await refreshCore();
     ensureProviderEditor();
     setStatus("provider-status", "Conexión borrada.", "ok");
@@ -337,7 +379,7 @@ function bind() {
   $("v-test").addEventListener("click", testVoice);
   $("v-delete").addEventListener("click", deleteVoice);
   $("new-voice-btn").addEventListener("click", () => {
-    newVoice();
+    if (!newVoice()) return;
     $("v-name").focus();
   });
   $("v-name").addEventListener("input", voiceHead);
@@ -367,6 +409,7 @@ function bind() {
   $("settings-save").addEventListener("click", () => saveSettings());
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") {
+      hideThreadMenu();
       const ids = ["settings-modal", "new-thread-modal"];
       const open = ids.some((id) => !$(id).classList.contains("hidden"));
       if (!$("settings-modal").classList.contains("hidden")) restoreSettings();

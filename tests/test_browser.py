@@ -261,6 +261,42 @@ class BrowserMicTests(unittest.TestCase):
         self.page.wait_for_selector("#voice-list .entity-row.active:has-text('Sistema lenta')")
         self.assertFalse(self.page.locator("#v-test").is_disabled())
 
+    def test_thread_menu_renames(self):
+        self.page.once("dialog", lambda dialog: dialog.accept("Charla con Vera"))
+        self.page.locator(f'[data-thread-menu="{self.thread_id}"]').click()
+        self.page.wait_for_selector("#thread-menu:not(.hidden)")
+        self.page.locator('[data-thread-action="rename"]').click()
+        self.page.wait_for_selector(f"[data-thread=\"{self.thread_id}\"] .thread-name:has-text('Charla con Vera')")
+        self.assertTrue(self.page.locator("#thread-menu").is_hidden())
+
+    def test_thread_menu_deletes_other_thread(self):
+        import httpx
+
+        extra = httpx.post(
+            self.base + "/api/threads",
+            json={"character_id": httpx.get(self.base + "/api/characters").json()["characters"][0]["id"],
+                  "provider_account_id": httpx.get(self.base + "/api/providers").json()["providers"][0]["id"],
+                  "model": "llama"},
+        ).json()["id"]
+        self.page.reload(wait_until="networkidle")
+        self.page.once("dialog", lambda dialog: dialog.accept())
+        self.page.locator(f'[data-thread-menu="{extra}"]').click()
+        self.page.locator('[data-thread-action="delete"]').click()
+        self.page.wait_for_function(f"() => !document.querySelector('[data-thread=\"{extra}\"]')")
+        self.assertIn(self.thread_id, self.page.url)
+
+    def test_unsaved_character_asks_before_switching(self):
+        self.page.goto(self.base + "/personajes", wait_until="networkidle")
+        self.page.wait_for_selector("#character-list .entity-row.active")
+        before = self.page.locator("#character-title").inner_text()
+        self.page.locator("#f-tono").fill("cambio sin guardar")
+        asked = []
+        self.page.once("dialog", lambda dialog: (asked.append(dialog.message), dialog.dismiss()))
+        self.page.locator("#character-list .entity-row:not(.active)").first.click()
+        self.assertTrue(asked and "sin guardar" in asked[0])
+        self.assertEqual(self.page.locator("#character-title").inner_text(), before)
+        self.assertEqual(self.page.locator("#f-tono").input_value(), "cambio sin guardar")
+
     def test_mobile_menu_opens_and_closes(self):
         self.page.set_viewport_size({"width": 375, "height": 812})
         self.page.locator("#menu-btn").click()

@@ -153,6 +153,21 @@
               <label>Apariencia
                 <textarea id="f-look" rows="2" placeholder="Cómo se ve. El avatar, cuando exista, lee esto."></textarea>
               </label>
+              <div class="photo-pick">
+                <div id="photo-preview" class="avatar-dot photo-preview" aria-hidden="true">?</div>
+                <div class="photo-copy">
+                  <strong>Foto</strong>
+                  <span class="muted">Se ve en la lista, el chat y los mensajes. No va al modelo.</span>
+                  <div class="photo-actions">
+                    <label class="file-btn">
+                      <input id="photo-file" type="file" accept="image/png,image/jpeg,image/webp">
+                      Elegir imagen
+                    </label>
+                    <button type="button" id="photo-clear" disabled>Quitar</button>
+                  </div>
+                </div>
+                <input id="f-foto" type="hidden">
+              </div>
             </section>
             <section class="form-section">
               <h3>
@@ -471,6 +486,16 @@
 
 
   <div id="toast" class="toast hidden" role="status"></div>
+  <div id="thread-menu" class="popover hidden" role="menu" aria-label="Opciones de la conversación">
+    <button type="button" role="menuitem" data-thread-action="rename">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4.5 19.5 5.5 15 15.8 4.7a1.8 1.8 0 0 1 2.5 0l1 1a1.8 1.8 0 0 1 0 2.5L9 18.5z"/></svg>
+      Renombrar
+    </button>
+    <button type="button" role="menuitem" data-thread-action="delete" class="danger-item">
+      <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V5h6v2M8 7l1 13h6l1-13"/></svg>
+      Eliminar
+    </button>
+  </div>
   <script type="importmap">
   {
     "imports": {

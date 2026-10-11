@@ -34,7 +34,12 @@ FIELD_KEYS = (
     "formato",
     "limites",
     "ejemplo",
+    "foto",
 )
+
+# La foto es solo para la interfaz: nunca entra al prompt.
+FOTO_MAX = 200_000
+_FOTO_PREFIX = re.compile(r"^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$")
 
 
 def default_fields() -> dict:
@@ -47,6 +52,7 @@ def default_fields() -> dict:
         "formato": DEFAULT_FORMAT,
         "limites": DEFAULT_LIMITS,
         "ejemplo": "",
+        "foto": "",
         "max_tokens": 600,
         "temperatura": 0.85,
     }
@@ -78,6 +84,17 @@ def coerce_fields(raw: dict | None) -> dict:
     out["max_tokens"] = _clamp_int(src.get("max_tokens", base["max_tokens"]), 600, 32, 4096)
     out["temperatura"] = _clamp_float(src.get("temperatura", base["temperatura"]), 0.85, 0.0, 2.0)
     return out
+
+
+def foto_error(fields: dict | None) -> str | None:
+    foto = str((fields or {}).get("foto") or "").strip() if isinstance(fields, dict) else ""
+    if not foto:
+        return None
+    if len(foto) > FOTO_MAX:
+        return "La foto es demasiado pesada. Elegí una imagen más chica."
+    if not _FOTO_PREFIX.match(foto):
+        return "La foto tiene que ser una imagen PNG, JPEG o WebP."
+    return None
 
 
 def minor_age_error(fields: dict | None) -> str | None:

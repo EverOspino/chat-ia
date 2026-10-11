@@ -45,10 +45,13 @@ function voiceHead() {
 
 function selectVoice(id) {
   const found = state.voices.find((item) => item.id === id);
-  if (found) fillVoiceForm(found);
+  if (!found) return;
+  if (found.id !== state.editingVoiceId && !confirmDiscard("voice")) return;
+  fillVoiceForm(found);
 }
 
 function newVoice() {
+  if (!confirmDiscard("voice")) return false;
   state.editingVoiceId = null;
   $("voice-form").reset();
   $("v-key").placeholder = "key de fish.audio";
@@ -60,6 +63,8 @@ function newVoice() {
   voiceHead();
   renderVoices();
   setStatus("voice-status", "");
+  state.dirty.voice = false;
+  return true;
 }
 
 function ensureVoiceEditor() {
@@ -83,6 +88,7 @@ async function saveVoice(event) {
   try {
     const saved = await api(path, { method, body: JSON.stringify(payload) });
     state.editingVoiceId = saved.id;
+    state.dirty.voice = false;
     $("v-key").value = "";
     $("v-test").disabled = false;
     $("v-delete").disabled = saved.provider === "browser";
@@ -144,6 +150,7 @@ async function deleteVoice() {
   try {
     await api("/api/voices/" + state.editingVoiceId, { method: "DELETE" });
     state.editingVoiceId = null;
+    state.dirty.voice = false;
     await refreshCore();
     ensureVoiceEditor();
     setStatus("voice-status", "Voz borrada.", "ok");

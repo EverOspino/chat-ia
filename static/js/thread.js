@@ -38,7 +38,7 @@ function showThread(thread, messages) {
   const name = thread ? thread.character_name || "" : "";
   $("chat-title").textContent = thread ? name || thread.title || "Nuevo hilo" : "Sin hilo";
   $("chat-character").value = name;
-  $("chat-avatar").textContent = initial(name);
+  paintAvatar($("chat-avatar"), name, characterFoto(characterOf(thread)));
   $("chat-avatar").classList.toggle("hidden", !name);
   $("stage-name").textContent = name;
   $("draft").placeholder = name ? "Escribí un mensaje a " + name + "…" : "Escribí un mensaje…";
@@ -99,6 +99,65 @@ async function openThread(id, opts = {}) {
   await loadModels(data.thread.provider_account_id);
   showThread(data.thread, data.messages);
   if (!opts.skipNav) navigate("chat", id, opts.replace);
+}
+
+async function removeThread(id) {
+  const found = state.threads.find((item) => item.id === id);
+  const label = found ? found.title || found.character_name || "este hilo" : "este hilo";
+  if (!confirm("¿Borrar «" + label + "»? Se pierden sus mensajes.")) return;
+  await api("/api/threads/" + id, { method: "DELETE" });
+  const wasOpen = state.thread && state.thread.id === id;
+  if (wasOpen) {
+    state.thread = null;
+    state.messages = [];
+  }
+  await refreshCore();
+  if (wasOpen) {
+    showThread(null, []);
+    navigate("chat", "", true);
+  } else {
+    renderThreads();
+  }
+}
+
+async function renameThread(id) {
+  const found = state.threads.find((item) => item.id === id);
+  if (!found) return;
+  const next = prompt("Nuevo título de la conversación", found.title || "");
+  if (next === null || !next.trim() || next.trim() === found.title) return;
+  const updated = await api("/api/threads/" + id, { method: "PATCH", body: JSON.stringify({ title: next }) });
+  if (state.thread && state.thread.id === id) state.thread.title = updated.title;
+  await refreshCore();
+  renderThreads();
+}
+
+function hideThreadMenu() {
+  const menu = $("thread-menu");
+  if (menu.classList.contains("hidden")) return;
+  menu.classList.add("hidden");
+  delete menu.dataset.thread;
+}
+
+function toggleThreadMenu(button) {
+  const menu = $("thread-menu");
+  const id = button.dataset.threadMenu;
+  if (!menu.classList.contains("hidden") && menu.dataset.thread === id) {
+    hideThreadMenu();
+    return;
+  }
+  menu.dataset.thread = id;
+  // Se mide en la esquina para que tome su ancho natural, después se ubica junto al botón.
+  menu.style.left = "0px";
+  menu.style.top = "0px";
+  menu.classList.remove("hidden");
+  const box = button.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  const height = menu.offsetHeight;
+  const left = Math.max(8, Math.min(box.right - width, innerWidth - width - 8));
+  const below = box.bottom + 4;
+  menu.style.left = left + "px";
+  menu.style.top = (below + height > innerHeight - 8 ? box.top - height - 4 : below) + "px";
+  menu.querySelector("button").focus();
 }
 
 async function applyRoute() {

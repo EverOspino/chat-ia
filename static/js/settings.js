@@ -13,6 +13,7 @@ function fillVoiceForm(found) {
   voiceHead();
   renderVoices();
   setStatus("voice-status", "");
+  state.dirty.voice = false;
 }
 
 function fillProviderForm(found) {
@@ -32,6 +33,7 @@ function fillProviderForm(found) {
   renderProviders();
   renderModels();
   setStatus("provider-status", "");
+  state.dirty.provider = false;
 }
 
 function providerHead(found) {
@@ -51,11 +53,13 @@ function providerHead(found) {
 function selectProvider(id) {
   const found = state.providers.find((item) => item.id === id);
   if (!found) return;
+  if (found.id !== state.editingProviderId && !confirmDiscard("provider")) return;
   fillProviderForm(found);
   loadModels(found.id);
 }
 
 function newProvider() {
+  if (!confirmDiscard("provider")) return false;
   state.editingProviderId = null;
   state.clearKey = false;
   $("provider-form").reset();
@@ -68,6 +72,8 @@ function newProvider() {
   renderProviders();
   renderModels();
   setStatus("provider-status", "");
+  state.dirty.provider = false;
+  return true;
 }
 
 function ensureProviderEditor() {

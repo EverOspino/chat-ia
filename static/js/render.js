@@ -56,9 +56,12 @@ function renderThreads() {
       head.textContent = label;
       list.appendChild(head);
     }
+    const active = state.thread && state.thread.id === thread.id;
+    const row = document.createElement("div");
+    row.className = "thread-row" + (active ? " active" : "");
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "thread-item" + (state.thread && state.thread.id === thread.id ? " active" : "");
+    btn.className = "thread-item" + (active ? " active" : "");
     btn.dataset.thread = thread.id;
     const name = document.createElement("span");
     name.className = "thread-name";
@@ -69,7 +72,16 @@ function renderThreads() {
       .filter(Boolean)
       .join(" · ");
     btn.append(name, sub);
-    list.appendChild(btn);
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "thread-more icon-btn";
+    more.dataset.threadMenu = thread.id;
+    more.title = "Más opciones";
+    more.setAttribute("aria-label", "Más opciones de " + name.textContent);
+    more.setAttribute("aria-haspopup", "menu");
+    more.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><circle cx="6" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="18" cy="12" r="1.6" fill="currentColor"/></svg>';
+    row.append(btn, more);
+    list.appendChild(row);
   }
 }
 
@@ -168,7 +180,7 @@ function bubble(msg, index) {
     const face = document.createElement("div");
     face.className = "avatar-dot turn-avatar";
     face.setAttribute("aria-hidden", "true");
-    face.textContent = initial(name);
+    paintAvatar(face, name, characterFoto(characterOf(state.thread)));
     wrap.appendChild(face);
     const meta = document.createElement("div");
     meta.className = "turn-meta";
@@ -219,7 +231,7 @@ function renderCharacters() {
     row.dataset.character = character.id;
     const dot = document.createElement("span");
     dot.className = "avatar-dot";
-    dot.textContent = initial(character.name);
+    paintAvatar(dot, character.name, characterFoto(character));
     const copy = document.createElement("span");
     copy.className = "entity-copy";
     const title = document.createElement("strong");

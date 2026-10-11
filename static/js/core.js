@@ -4,6 +4,7 @@ const state = {
   characters: [],
   threads: [],
   threadQuery: "",
+  dirty: { character: false, provider: false, voice: false },
   thread: null,
   messages: [],
   models: [],
@@ -83,6 +84,38 @@ async function copyText(text) {
 function initial(name) {
   const t = String(name || "?").trim();
   return t ? t[0].toUpperCase() : "?";
+}
+
+// Cada personaje tiene un tono propio, estable, sacado del nombre.
+function nameHue(name) {
+  let hue = 0;
+  for (const ch of String(name || "").toLowerCase()) hue = (hue * 31 + ch.codePointAt(0)) % 360;
+  return hue;
+}
+
+function paintAvatar(node, name, foto) {
+  if (!node) return;
+  const photo = typeof foto === "string" && foto.startsWith("data:image/") ? foto : "";
+  node.textContent = photo ? "" : initial(name);
+  node.classList.toggle("has-photo", Boolean(photo));
+  node.style.backgroundImage = photo ? 'url("' + photo + '")' : "";
+  node.style.setProperty("--hue", String(nameHue(name)));
+}
+
+function characterOf(thread) {
+  if (!thread) return null;
+  return state.characters.find((item) => item.id === thread.character_id) || null;
+}
+
+function characterFoto(character) {
+  return (character && character.fields && character.fields.foto) || "";
+}
+
+function confirmDiscard(kind) {
+  if (!state.dirty[kind]) return true;
+  if (!confirm("Hay cambios sin guardar en esta ficha. ¿Descartarlos?")) return false;
+  state.dirty[kind] = false;
+  return true;
 }
 
 function growArea(node, cap) {

@@ -18,6 +18,7 @@ from app.personality import (
     calibrate_ratio,
     compile_prompt,
     default_fields,
+    foto_error,
     fresh_replies,
     minor_age_error,
     parse_replies,
@@ -116,6 +117,7 @@ class ThreadPatch(BaseModel):
     provider_account_id: str | None = None
     voice_account_id: str | None = None
     speak: int | None = None
+    title: str | None = None
 
 
 class VoiceIn(BaseModel):
@@ -207,7 +209,7 @@ def get_characters():
 
 @app.post("/api/characters")
 def post_character(body: FieldsIn):
-    err = minor_age_error(body.fields)
+    err = minor_age_error(body.fields) or foto_error(body.fields)
     if err:
         raise HTTPException(400, err)
     name = str((body.fields or {}).get("nombre") or "").strip()
@@ -218,7 +220,7 @@ def post_character(body: FieldsIn):
 
 @app.put("/api/characters/{character_id}")
 def put_character(character_id: str, body: FieldsIn):
-    err = minor_age_error(body.fields)
+    err = minor_age_error(body.fields) or foto_error(body.fields)
     if err:
         raise HTTPException(400, err)
     name = str((body.fields or {}).get("nombre") or "").strip()
@@ -364,6 +366,13 @@ def patch_thread(thread_id: str, body: ThreadPatch):
         voice_kw["voice_account_id"] = body.voice_account_id or ""
     if "speak" in body.model_fields_set:
         voice_kw["speak"] = 1 if body.speak else 0
+    if "title" in body.model_fields_set:
+        title = " ".join((body.title or "").split())
+        if not title:
+            raise HTTPException(400, "El título no puede quedar vacío.")
+        if len(title) > 80:
+            raise HTTPException(400, "Ese título es demasiado largo.")
+        voice_kw["title"] = title
     updated = db.update_thread(
         thread_id,
         model=model,
